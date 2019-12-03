@@ -3,14 +3,8 @@ import c4d
 import os
 
 class res(object):
-    QUANTIZE_SPLINE_GROUP = 1000
-    QUANTIZE_SPLINE_ORDER = 1002
-    QUANTIZE_SPLINE_ORDER_XYZ = 1
-    QUANTIZE_SPLINE_ORDER_XZY = 2
-    QUANTIZE_SPLINE_ORDER_YXZ = 3
-    QUANTIZE_SPLINE_ORDER_YZX = 4
-    QUANTIZE_SPLINE_ORDER_ZYX = 5
-    QUANTIZE_SPLINE_ORDER_ZXY = 6
+    SGG_HOR = 1000,
+    SGG_VERT = 1001,
 res = res()
 
 
@@ -23,7 +17,7 @@ def load_bitmap(path):
 
 class StainedGlassGrid(c4d.plugins.ObjectData):
     PLUGIN_ID = 1054108
-    PLUGIN_NAME = 'Quantize Spline'
+    PLUGIN_NAME = 'Stained Glass Grid'
     PLUGIN_INFO = c4d.OBJECT_GENERATOR | c4d.OBJECT_INPUT
     PLUGIN_DESC = 'Ostainedglassgrid'
     PLUGIN_ICON = load_bitmap('res/icons/stained glass grid.tiff')
@@ -42,9 +36,11 @@ class StainedGlassGrid(c4d.plugins.ObjectData):
         )
 
     def Init(self, node):
-        self.InitAttr(node, int, [res.QUANTIZE_SPLINE_ORDER])
+        self.InitAttr(node, float, res.SGG_HOR)
+        self.InitAttr(node, float, res.SGG_VERT)
 
-        node[res.QUANTIZE_SPLINE_ORDER] = 1
+        node[res.SGG_HOR] = 1.0
+        node[res.SGG_VERT] = 1.0
         
         return True
 
@@ -57,7 +53,17 @@ class StainedGlassGrid(c4d.plugins.ObjectData):
         if not hClone['dirty']: return hClone['clone']
         if hClone['clone'] is None: return None
 
-        return hClone['clone']
+        outObj = inObj.GetCache()
+        if outObj is None: return None
+
+        hor = float(op[res.SGG_HOR])
+        vert = float(op[res.SGG_VERT])
+
+        for x in range(outObj.GetPointCount()):
+            p = outObj.GetPoint(x)
+            print p
+
+        return outObj
 
 
 if __name__ == '__main__':

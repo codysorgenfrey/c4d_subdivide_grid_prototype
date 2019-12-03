@@ -1,0 +1,8 @@
+CONTAINER Ostainedglassgrid {
+    INCLUDE Obase;
+    NAME Ostainedglassgrid;
+    GROUP ID_OBJECTPROPERTIES {
+        REAL SGG_HOR {MIN 0.0; MAX 100.0; UNIT PERCENT; DEFAULT 100.0;}
+        REAL SGG_VERT {MIN 0.0; MAX 100.0; UNIT PERCENT; DEFAULT 100.0;}
+    }
+}

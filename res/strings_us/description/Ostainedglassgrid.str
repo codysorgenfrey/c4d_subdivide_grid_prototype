@@ -1,0 +1,5 @@
+STRINGTABLE Ostainedglassgrid {
+    Ostainedglassgrid "Stained Glass Grid";
+    SGG_HOR "Horizontal";
+    SGG_VERT "Vertical";
+}
