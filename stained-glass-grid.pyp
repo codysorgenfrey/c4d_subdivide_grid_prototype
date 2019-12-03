@@ -7,6 +7,8 @@ class res(object):
     SGG_VERT = 1001,
 res = res()
 
+def isclose(a, b, rel_tol=1e-09, abs_tol=0.0):
+    return abs(a-b) <= max(rel_tol * max(abs(a), abs(b)), abs_tol)
 
 def load_bitmap(path):
     path = os.path.join(os.path.dirname(__file__), path)
@@ -53,11 +55,11 @@ class StainedGlassGrid(c4d.plugins.ObjectData):
 
         for x in range(outObj.GetPointCount()):
             p = outObj.GetPoint(x)
-            if p.x != 0.0 and p.x != size.x:
+            if (not isclose(p.x, 0.0)) and (not isclose(abs(p.x), size.x)):
                 p.x = c4d.utils.RangeMap(hor, 0.0, 1.0, 0.0, float(p.x), False)
-            if -p.y != 0.0 and -p.y != size.y:
+            if (not isclose(p.y, 0.0)) and (not isclose(abs(p.y), size.y)):
                 p.y = c4d.utils.RangeMap(vert, 0.0, 1.0, 0.0, float(p.y), False)
-            if -p.z != 0.0 and -p.z != size.z:
+            if (not isclose(p.z, 0.0)) and (not isclose(abs(p.z), size.z)):
                 p.z = c4d.utils.RangeMap(vert, 0.0, 1.0, 0.0, float(p.z), False)
             outObj.SetPoint(x, p)
 
@@ -75,7 +77,6 @@ class StainedGlassGrid(c4d.plugins.ObjectData):
         hClone = op.GetAndCheckHierarchyClone(hh, inObj, c4d.HIERARCHYCLONEFLAGS_ASSPLINE, False)
 
         if not hClone['dirty']: return hClone['clone']
-        if hClone['clone'] is None: return None
         if not bool(hClone['clone'].GetInfo() & c4d.OBJECT_ISSPLINE):
             self.INPUT_SPLINE = None
             return None
