@@ -1,5 +1,6 @@
 STRINGTABLE Ostainedglassgrid {
     Ostainedglassgrid "Stained Glass Grid";
-    SGG_HOR "Horizontal";
-    SGG_VERT "Vertical";
+    SGG_COMPLETE "Completion";
+    SGG_HOR "Horizontal Offset";
+    SGG_VERT "Vertical Offset";
 }
