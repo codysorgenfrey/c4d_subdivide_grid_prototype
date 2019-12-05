@@ -2,17 +2,17 @@
 import c4d # pylint: disable=import-error
 import os
 
-class res_SGG(object):
-    SGG_COMPLETE = 1000
-    SGG_HOR = 1001
-    SGG_VERT = 1002
-res_SGG = res_SGG()
+class res_SG(object):
+    SG_COMPLETE = 1000
+    SG_HOR = 1001
+    SG_VERT = 1002
+res_SG = res_SG()
 
-class res_SGGD(object):
-    SGGD_COMPLETE = 1000
-    SGGD_OFF = 1001
-    SGGD_OFF_MULT = 1002
-res_SGGD = res_SGGD()
+class res_SGD(object):
+    SGD_COMPLETE = 1000
+    SGD_OFF = 1001
+    SGD_OFF_MULT = 1002
+res_SGD = res_SGD()
 
 def isclose(a, b, rel_tol=1e-09, abs_tol=0.0):
     return abs(a-b) <= max(rel_tol * max(abs(a), abs(b)), abs_tol)
@@ -24,12 +24,12 @@ def load_bitmap(path):
         bmp = None
     return bmp
 
-class StainedGlassGridDriver(c4d.plugins.TagData):
+class SubdivideGridDriver(c4d.plugins.TagData):
     PLUGIN_ID = 1054125
-    PLUGIN_NAME = 'Stained Glass Grid Driver'
+    PLUGIN_NAME = 'Subdivide Grid Driver'
     PLUGIN_INFO = c4d.TAG_VISIBLE | c4d.TAG_EXPRESSION
-    PLUGIN_DESC = 'Tstainedglassgriddriver'
-    PLUGIN_ICON = load_bitmap('res/icons/stained glass grid.tiff')
+    PLUGIN_DESC = 'Tsubdividegriddriver'
+    PLUGIN_ICON = load_bitmap('res/icons/subdivide grid.tiff')
     PLUGIN_DISKLEVEL = 0
 
     @classmethod
@@ -45,19 +45,19 @@ class StainedGlassGridDriver(c4d.plugins.TagData):
         )
 
     def Init(self, node):
-        self.InitAttr(node, float, res_SGGD.SGGD_COMPLETE)
-        self.InitAttr(node, float, res_SGGD.SGGD_OFF)
-        self.InitAttr(node, float, res_SGGD.SGGD_OFF_MULT)
+        self.InitAttr(node, float, res_SGD.SGD_COMPLETE)
+        self.InitAttr(node, float, res_SGD.SGD_OFF)
+        self.InitAttr(node, float, res_SGD.SGD_OFF_MULT)
 
-        node[res_SGGD.SGGD_COMPLETE] = 100.0
-        node[res_SGGD.SGGD_OFF] = -12.0
-        node[res_SGGD.SGGD_OFF_MULT] = 1.0
+        node[res_SGD.SGD_COMPLETE] = 100.0
+        node[res_SGD.SGD_OFF] = -12.0
+        node[res_SGD.SGD_OFF_MULT] = 1.0
         
         return True
 
     def RecursiveSetDirty(self, obj):
         while obj:
-            if obj.GetType() == StainedGlassGrid.PLUGIN_ID:
+            if obj.GetType() == SubdivideGrid.PLUGIN_ID:
                 obj.SetDirty(c4d.DIRTYFLAGS_DATA)
 
             child = obj.GetDown()
@@ -70,12 +70,12 @@ class StainedGlassGridDriver(c4d.plugins.TagData):
         self.RecursiveSetDirty(obj) 
         return c4d.EXECUTIONRESULT_OK
 
-class StainedGlassGrid(c4d.plugins.ObjectData):
+class SubdivideGrid(c4d.plugins.ObjectData):
     PLUGIN_ID = 1054108
-    PLUGIN_NAME = 'Stained Glass Grid'
+    PLUGIN_NAME = 'Subdivide Grid'
     PLUGIN_INFO = c4d.OBJECT_GENERATOR | c4d.OBJECT_INPUT | c4d.OBJECT_ISSPLINE
-    PLUGIN_DESC = 'Ostainedglassgrid'
-    PLUGIN_ICON = load_bitmap('res/icons/stained glass grid.tiff')
+    PLUGIN_DESC = 'Osubdividegrid'
+    PLUGIN_ICON = load_bitmap('res/icons/subdivide grid.tiff')
     PLUGIN_DISKLEVEL = 0
     INPUT_SPLINE = None
     DRIVER = False
@@ -93,20 +93,20 @@ class StainedGlassGrid(c4d.plugins.ObjectData):
         )
 
     def Init(self, node):
-        self.InitAttr(node, float, res_SGG.SGG_COMPLETE)
-        self.InitAttr(node, float, res_SGG.SGG_HOR)
-        self.InitAttr(node, float, res_SGG.SGG_VERT)
+        self.InitAttr(node, float, res_SG.SG_COMPLETE)
+        self.InitAttr(node, float, res_SG.SG_HOR)
+        self.InitAttr(node, float, res_SG.SG_VERT)
 
-        node[res_SGG.SGG_COMPLETE] = 100.0
-        node[res_SGG.SGG_HOR] = 0.0
-        node[res_SGG.SGG_VERT] = 0.0
+        node[res_SG.SG_COMPLETE] = 100.0
+        node[res_SG.SG_HOR] = 0.0
+        node[res_SG.SG_VERT] = 0.0
         
         return True
 
     def GetDEnabling(self, node, id, t_data, flags, itemdesc):
         if self.DRIVER:
             paramID = id[0].id
-            if paramID == res_SGG.SGG_COMPLETE:
+            if paramID == res_SG.SG_COMPLETE:
                 return False
 
         return True
@@ -115,16 +115,16 @@ class StainedGlassGrid(c4d.plugins.ObjectData):
         doc = op.GetDocument()
         curTime = doc.GetTime()
         fps = doc.GetFps()
-        horOff = c4d.BaseTime(op[res_SGG.SGG_HOR], fps)
-        vertOff = c4d.BaseTime(op[res_SGG.SGG_VERT], fps)
+        horOff = c4d.BaseTime(op[res_SG.SG_HOR], fps)
+        vertOff = c4d.BaseTime(op[res_SG.SG_VERT], fps)
 
         parent = op.GetUp()
-        tag = op.GetTag(StainedGlassGridDriver.PLUGIN_ID)
+        tag = op.GetTag(SubdivideGridDriver.PLUGIN_ID)
         level = 0
         while parent and not tag:
-            if parent.GetType() == StainedGlassGrid.PLUGIN_ID:
+            if parent.GetType() == SubdivideGrid.PLUGIN_ID:
                 level += 1
-            tag = parent.GetTag(StainedGlassGridDriver.PLUGIN_ID)
+            tag = parent.GetTag(SubdivideGridDriver.PLUGIN_ID)
             parent = parent.GetUp()
 
         driver = op
@@ -133,15 +133,15 @@ class StainedGlassGrid(c4d.plugins.ObjectData):
         if tag is not None:
             driver = tag
             self.DRIVER = True
-            offsetStep = tag[res_SGGD.SGGD_OFF]
-            offsetMult = tag[res_SGGD.SGGD_OFF_MULT]
+            offsetStep = tag[res_SGD.SGD_OFF]
+            offsetMult = tag[res_SGD.SGD_OFF_MULT]
             offsetStep *= offsetMult
 
         levelOff = c4d.BaseTime(offsetStep * level, fps)
         doc.AnimateObject(driver, curTime + horOff + levelOff, c4d.ANIMATEFLAGS_NONE)
-        hor = driver[res_SGG.SGG_COMPLETE]
+        hor = driver[res_SG.SG_COMPLETE]
         doc.AnimateObject(driver, curTime + vertOff + levelOff, c4d.ANIMATEFLAGS_NONE)
-        vert = driver[res_SGG.SGG_COMPLETE]
+        vert = driver[res_SG.SG_COMPLETE]
         outObj = self.INPUT_SPLINE.GetClone(c4d.COPYFLAGS_NONE)
         size = self.INPUT_SPLINE.GetRad() * 2
 
@@ -180,5 +180,5 @@ class StainedGlassGrid(c4d.plugins.ObjectData):
         return self.MakeSpline(op)
 
 if __name__ == '__main__':
-    StainedGlassGrid.Register()
-    StainedGlassGridDriver.Register()
+    SubdivideGrid.Register()
+    SubdivideGridDriver.Register()

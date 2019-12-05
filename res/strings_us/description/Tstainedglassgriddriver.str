@@ -1,6 +1,0 @@
-STRINGTABLE Tstainedglassgriddriver {
-    Tstainedglassgriddriver "Stained Glass Grid Driver";
-    SGGD_COMPLETE "Completion";
-    SGGD_OFF "Recursive Offset";
-    SGGD_OFF_MULT "Recursive Offset Multiplier";
-}

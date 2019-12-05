@@ -1,0 +1,6 @@
+STRINGTABLE Osubdividegrid {
+    Osubdividegrid "Subdivide Grid";
+    SG_COMPLETE "Completion";
+    SG_HOR "Horizontal Offset";
+    SG_VERT "Vertical Offset";
+}
