@@ -179,6 +179,30 @@ class SubdivideGrid(c4d.plugins.ObjectData):
         self.INPUT_SPLINE = hClone['clone']
         return self.MakeSpline(op)
 
+class SubdivideGridGroup(c4d.plugins.CommandData):
+    PLUGIN_ID = 1054128
+    PLUGIN_NAME = 'Subdivide Grid Group'
+    PLUGIN_HELP = 'Group selected objects under a Subdivide Grid'
+    PLUGIN_INFO = 0
+    PLUGIN_ICON = load_bitmap('res/icons/subdivide grid.tiff')
+    PLUGIN_DISKLEVEL = 0
+
+    @classmethod
+    def Register(cls):
+        return c4d.plugins.RegisterCommandPlugin(
+            cls.PLUGIN_ID,
+            cls.PLUGIN_NAME,
+            cls.PLUGIN_INFO,
+            cls.PLUGIN_ICON,
+            cls.PLUGIN_HELP,
+            SubdivideGridGroup(),
+        )
+
+    def Execute(self, doc):
+        # to be written
+        return True
+
 if __name__ == '__main__':
     SubdivideGrid.Register()
     SubdivideGridDriver.Register()
+    SubdivideGridGroup.Register()
