@@ -86,6 +86,7 @@ class SubdivideGrid(c4d.plugins.ObjectData):
     PLUGIN_DESC = 'Osubdividegrid'
     PLUGIN_ICON = load_bitmap('res/icons/subdivide grid.tiff')
     PLUGIN_DISKLEVEL = 0
+    LAST_FRAME = -1
     INPUT_SPLINE = None
     DRIVER = False
 
@@ -120,6 +121,13 @@ class SubdivideGrid(c4d.plugins.ObjectData):
 
         return True
 
+    # needed so that object updates each frame when there's a time offset
+    def CheckDirty(self, op, doc):
+        frame = doc.GetTime().GetFrame(doc.GetFps())
+        if frame != self.LAST_FRAME:
+            self.LAST_FRAME = frame
+            op.SetDirty(c4d.DIRTYFLAGS_DATA)
+
     def RecursiveCollectInputs(self, op, hh, obj):
         while obj:
             if (obj.GetInfo() & c4d.OBJECT_ISSPLINE) and obj[c4d.ID_BASEOBJECT_GENERATOR_FLAG]:
@@ -133,6 +141,7 @@ class SubdivideGrid(c4d.plugins.ObjectData):
                     continue
                 
                 pntCnt = spline.GetPointCount()
+                tanCnt = spline.GetTangentCount()
                 mySegCnt = self.INPUT_SPLINE.GetSegmentCount()
                 myPntCnt = self.INPUT_SPLINE.GetPointCount()
                 newPntCnt = myPntCnt + pntCnt
@@ -141,7 +150,11 @@ class SubdivideGrid(c4d.plugins.ObjectData):
 
                 self.INPUT_SPLINE.ResizeObject(newPntCnt, newSegCnt)
                 for x in range(pntCnt):
-                    self.INPUT_SPLINE.SetPoint((myPntCnt) + x, objMarr * spline.GetPoint(x))
+                    self.INPUT_SPLINE.SetPoint(myPntCnt + x, objMarr * spline.GetPoint(x))
+
+                for x in range(tanCnt):
+                    tan = spline.GetTangent(x)
+                    self.INPUT_SPLINE.SetTangent(myPntCnt + x, tan['vl'], tan['vr'])
                 
                 self.INPUT_SPLINE.SetSegment(newSegCnt - 1, pntCnt, spline.IsClosed())
                 self.INPUT_SPLINE.Message(c4d.MSG_UPDATE) # because we updated its points
