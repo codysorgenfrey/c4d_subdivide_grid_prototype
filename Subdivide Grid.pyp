@@ -24,15 +24,6 @@ def load_bitmap(path):
         bmp = None
     return bmp
 
-def getSegmentForPoint(obj, x):
-    totalPointCount = 0
-    segCount = obj.GetSegmentCount()
-    for s in range(segCount):
-        seg = obj.GetSegment(s)
-        totalPointCount += seg['cnt']
-        if x < totalPointCount:
-            return seg
-
 class SubdivideGridDriver(c4d.plugins.TagData):
     PLUGIN_ID = 1054125
     PLUGIN_NAME = 'Subdivide Grid Driver'
@@ -75,7 +66,7 @@ class SubdivideGridDriver(c4d.plugins.TagData):
             obj = obj.GetNext()
     
     def Execute(self, tag, doc, op, bt, priority, flags):
-        obj = op.GetDown()
+        obj = op.GetDown() # start down cause tag changes already mark op as dirty
         self.RecursiveSetDirty(obj) 
         return c4d.EXECUTIONRESULT_OK
 
@@ -121,15 +112,9 @@ class SubdivideGrid(c4d.plugins.ObjectData):
 
         return True
 
-    # needed so that object updates each frame when there's a time offset
-    def CheckDirty(self, op, doc):
-        frame = doc.GetTime().GetFrame(doc.GetFps())
-        if frame != self.LAST_FRAME:
-            self.LAST_FRAME = frame
-            op.SetDirty(c4d.DIRTYFLAGS_DATA)
-
     def RecursiveCollectInputs(self, op, hh, obj):
         while obj:
+            obj.Touch()
             if (obj.GetInfo() & c4d.OBJECT_ISSPLINE) and obj[c4d.ID_BASEOBJECT_GENERATOR_FLAG]:
                 if obj.GetType() == c4d.Ospline:
                     spline = obj
@@ -160,6 +145,27 @@ class SubdivideGrid(c4d.plugins.ObjectData):
                 self.INPUT_SPLINE.Message(c4d.MSG_UPDATE) # because we updated its points
 
             obj = obj.GetNext()
+
+    def SegmentIsRect(self, obj, start, end):
+        isRect = True
+        for x in range(start, end):
+            ni = x + 1
+            if ni >= end:
+                ni = start
+            pi = x - 1
+            if pi < start:
+                pi = end - 1
+            pp = obj.GetPoint(pi)
+            p = obj.GetPoint(x)
+            np = obj.GetPoint(ni)
+
+            pd = pp - p
+            nd = p - np
+            dot = pd.Dot(nd)
+
+            isRect = isRect and dot == 0
+
+        return isRect
 
     def PointMakesBorder(self, p, boundsMin, boundMax):
         makesBorder = c4d.Vector(0)
@@ -202,21 +208,33 @@ class SubdivideGrid(c4d.plugins.ObjectData):
         hor = driver[res_SG.SG_COMPLETE]
         doc.AnimateObject(driver, curTime + vertOff + levelOff, c4d.ANIMATEFLAGS_NONE)
         vert = driver[res_SG.SG_COMPLETE]
-        doc.AnimateObject(driver, curTime, c4d.ANIMATEFLAGS_NONE)
         outObj = self.INPUT_SPLINE.GetClone(c4d.COPYFLAGS_NONE)
         size = self.INPUT_SPLINE.GetRad() * 2
 
-        pointCount = outObj.GetPointCount()
-        for x in range(pointCount):
-            p = outObj.GetPoint(x)
-            locked = self.PointMakesBorder(p, c4d.Vector(0), size)
-            if not bool(locked.x):
-                p.x = c4d.utils.RangeMap(vert, 0.0, 1.0, 0.0, p.x, False)
-            if not bool(locked.y):
-                p.y = c4d.utils.RangeMap(hor, 0.0, 1.0, 0.0, p.y, False)
-            if not bool(locked.z):
-                p.z = c4d.utils.RangeMap(hor, 0.0, 1.0, 0.0, p.z, False)
-            outObj.SetPoint(x, p)
+        pointOff = 0
+        segCount = outObj.GetSegmentCount()
+        for x in range(segCount):
+            seg = outObj.GetSegment(x)
+            newPointOff = pointOff + seg['cnt']
+            scaleHor = hor
+            scaleVert = vert
+            isRect = self.SegmentIsRect(outObj, pointOff, newPointOff)
+            if not isRect:
+                scaleHor = max(hor, vert)
+                scaleVert = scaleHor
+            
+            for y in range(pointOff, newPointOff):
+                p = outObj.GetPoint(y)
+                locked = self.PointMakesBorder(p, c4d.Vector(0), size)
+                if not bool(locked.x) or not isRect:
+                    p.x = c4d.utils.RangeMap(scaleVert, 0.0, 1.0, 0.0, p.x, False)
+                if not bool(locked.y) or not isRect:
+                    p.y = c4d.utils.RangeMap(scaleHor, 0.0, 1.0, 0.0, p.y, False)
+                if not bool(locked.z) or not isRect:
+                    p.z = c4d.utils.RangeMap(scaleHor, 0.0, 1.0, 0.0, p.z, False)
+                outObj.SetPoint(y, p)
+            
+            pointOff = newPointOff
 
         outObj.Message(c4d.MSG_UPDATE)
         return outObj
@@ -231,12 +249,17 @@ class SubdivideGrid(c4d.plugins.ObjectData):
             self.INPUT_SPLINE = None
             return None
 
-        hClone = op.GetAndCheckHierarchyClone(hh, inObj, c4d.HIERARCHYCLONEFLAGS_ASSPLINE, True)
-        if not hClone['dirty']: return hClone['clone']
-        
+        hClone = op.GetAndCheckHierarchyClone(hh, inObj, c4d.HIERARCHYCLONEFLAGS_ASSPLINE, False)
+        doc = op.GetDocument()
+        frame = doc.GetTime().GetFrame(doc.GetFps())
+        if not hClone['dirty'] and frame == self.LAST_FRAME:
+            return hClone['clone']
+    
         self.INPUT_SPLINE = c4d.SplineObject(0, c4d.SPLINETYPE_BEZIER)
         self.INPUT_SPLINE[c4d.SPLINEOBJECT_CLOSED] = True
         self.RecursiveCollectInputs(op, hh, inObj)
+
+        self.LAST_FRAME = frame
 
         return self.MakeSpline(op)
 
