@@ -24,6 +24,15 @@ def load_bitmap(path):
         bmp = None
     return bmp
 
+def getSegmentForPoint(obj, x):
+    totalPointCount = 0
+    segCount = obj.GetSegmentCount()
+    for s in range(segCount):
+        seg = obj.GetSegment(s)
+        totalPointCount += seg['cnt']
+        if x < totalPointCount:
+            return seg
+
 class SubdivideGridDriver(c4d.plugins.TagData):
     PLUGIN_ID = 1054125
     PLUGIN_NAME = 'Subdivide Grid Driver'
@@ -111,6 +120,44 @@ class SubdivideGrid(c4d.plugins.ObjectData):
 
         return True
 
+    def RecursiveCollectInputs(self, op, hh, obj):
+        while obj:
+            if (obj.GetInfo() & c4d.OBJECT_ISSPLINE) and obj[c4d.ID_BASEOBJECT_GENERATOR_FLAG]:
+                if obj.GetType() == c4d.Ospline:
+                    spline = obj
+                else:
+                    spline = obj.GetRealSpline()
+
+                if spline is None:
+                    obj = obj.GetNext()
+                    continue
+                
+                pntCnt = spline.GetPointCount()
+                mySegCnt = self.INPUT_SPLINE.GetSegmentCount()
+                myPntCnt = self.INPUT_SPLINE.GetPointCount()
+                newPntCnt = myPntCnt + pntCnt
+                newSegCnt = mySegCnt + 1
+                objMarr = obj.GetMg()
+
+                self.INPUT_SPLINE.ResizeObject(newPntCnt, newSegCnt)
+                for x in range(pntCnt):
+                    self.INPUT_SPLINE.SetPoint((myPntCnt) + x, objMarr * spline.GetPoint(x))
+                
+                self.INPUT_SPLINE.SetSegment(newSegCnt - 1, pntCnt, spline.IsClosed())
+                self.INPUT_SPLINE.Message(c4d.MSG_UPDATE) # because we updated its points
+
+            obj = obj.GetNext()
+
+    def PointMakesBorder(self, p, boundsMin, boundMax):
+        makesBorder = c4d.Vector(0)
+        if isclose(p.x, boundsMin.x) or isclose(abs(p.x), boundMax.x):
+            makesBorder.x = 1
+        if isclose(p.y, boundsMin.y) or isclose(abs(p.y), boundMax.y):
+            makesBorder.y = 1
+        if isclose(p.z, boundsMin.z) or isclose(abs(p.z), boundMax.z):
+            makesBorder.z = 1
+        return makesBorder
+
     def MakeSpline(self, op):
         doc = op.GetDocument()
         curTime = doc.GetTime()
@@ -127,11 +174,11 @@ class SubdivideGrid(c4d.plugins.ObjectData):
             tag = parent.GetTag(SubdivideGridDriver.PLUGIN_ID)
             parent = parent.GetUp()
 
-        driver = op
+        driver = op.GetClone(c4d.COPYFLAGS_NONE)
         self.DRIVER = False
         offsetStep = 0.0
         if tag is not None:
-            driver = tag
+            driver = tag.GetClone(c4d.COPYFLAGS_NONE)
             self.DRIVER = True
             offsetStep = tag[res_SGD.SGD_OFF]
             offsetMult = tag[res_SGD.SGD_OFF_MULT]
@@ -142,16 +189,19 @@ class SubdivideGrid(c4d.plugins.ObjectData):
         hor = driver[res_SG.SG_COMPLETE]
         doc.AnimateObject(driver, curTime + vertOff + levelOff, c4d.ANIMATEFLAGS_NONE)
         vert = driver[res_SG.SG_COMPLETE]
+        doc.AnimateObject(driver, curTime, c4d.ANIMATEFLAGS_NONE)
         outObj = self.INPUT_SPLINE.GetClone(c4d.COPYFLAGS_NONE)
         size = self.INPUT_SPLINE.GetRad() * 2
 
-        for x in range(outObj.GetPointCount()):
+        pointCount = outObj.GetPointCount()
+        for x in range(pointCount):
             p = outObj.GetPoint(x)
-            if (not isclose(p.x, 0.0)) and (not isclose(abs(p.x), size.x)):
+            locked = self.PointMakesBorder(p, c4d.Vector(0), size)
+            if not bool(locked.x):
                 p.x = c4d.utils.RangeMap(vert, 0.0, 1.0, 0.0, p.x, False)
-            if (not isclose(p.y, 0.0)) and (not isclose(abs(p.y), size.y)):
+            if not bool(locked.y):
                 p.y = c4d.utils.RangeMap(hor, 0.0, 1.0, 0.0, p.y, False)
-            if (not isclose(p.z, 0.0)) and (not isclose(abs(p.z), size.z)):
+            if not bool(locked.z):
                 p.z = c4d.utils.RangeMap(hor, 0.0, 1.0, 0.0, p.z, False)
             outObj.SetPoint(x, p)
 
@@ -168,15 +218,13 @@ class SubdivideGrid(c4d.plugins.ObjectData):
             self.INPUT_SPLINE = None
             return None
 
-        hClone = op.GetAndCheckHierarchyClone(hh, inObj, c4d.HIERARCHYCLONEFLAGS_ASSPLINE, False)
-
+        hClone = op.GetAndCheckHierarchyClone(hh, inObj, c4d.HIERARCHYCLONEFLAGS_ASSPLINE, True)
         if not hClone['dirty']: return hClone['clone']
-        if hClone['clone'] is None: return None
-        if not bool(hClone['clone'].GetInfo() & c4d.OBJECT_ISSPLINE):
-            self.INPUT_SPLINE = None
-            return None
+        
+        self.INPUT_SPLINE = c4d.SplineObject(0, c4d.SPLINETYPE_BEZIER)
+        self.INPUT_SPLINE[c4d.SPLINEOBJECT_CLOSED] = True
+        self.RecursiveCollectInputs(op, hh, inObj)
 
-        self.INPUT_SPLINE = hClone['clone']
         return self.MakeSpline(op)
 
 class SubdivideGridGroup(c4d.plugins.CommandData):
