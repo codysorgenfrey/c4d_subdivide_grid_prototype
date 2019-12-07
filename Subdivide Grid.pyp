@@ -219,20 +219,16 @@ class SubdivideGrid(c4d.plugins.ObjectData):
             isRect = self.SegmentIsRect(outObj, pointOff, newPointOff)
             if not isRect:
                 scale = min(hor, vert)
-                off = max(hor, vert)
-
                 movePoint = outObj.GetPoint(pointOff)
                 movedPoint = c4d.Vector()
-                movedPoint.x = c4d.utils.RangeMap(off, 0.0, 1.0, 0.0, movePoint.x, False)
-                movedPoint.y = c4d.utils.RangeMap(off, 0.0, 1.0, 0.0, movePoint.y, False)
-                movedPoint.z = c4d.utils.RangeMap(off, 0.0, 1.0, 0.0, movePoint.z, False)
-                moveDiff = movedPoint - movePoint
+                movedPoint.x = c4d.utils.RangeMap(vert, 0.0, 1.0, 0.0, movePoint.x, False)
+                movedPoint.y = c4d.utils.RangeMap(hor, 0.0, 1.0, 0.0, movePoint.y, False)
+                movedPoint.z = c4d.utils.RangeMap(hor, 0.0, 1.0, 0.0, movePoint.z, False)
                 for y in range(pointOff, newPointOff):
                     p = outObj.GetPoint(y)
-                    p += moveDiff
-                    p.x = c4d.utils.RangeMap(scale, 0.0, 1.0, 0.0, p.x, False)
-                    p.y = c4d.utils.RangeMap(scale, 0.0, 1.0, 0.0, p.y, False)
-                    p.z = c4d.utils.RangeMap(scale, 0.0, 1.0, 0.0, p.z, False)
+                    scaleDiff = p - movePoint
+                    scaleOff = scaleDiff * scale
+                    p = movedPoint + scaleOff
                     outObj.SetPoint(y, p)
             else:
                 for y in range(pointOff, newPointOff):
