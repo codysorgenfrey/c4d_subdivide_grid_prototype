@@ -216,23 +216,35 @@ class SubdivideGrid(c4d.plugins.ObjectData):
         for x in range(segCount):
             seg = outObj.GetSegment(x)
             newPointOff = pointOff + seg['cnt']
-            scaleHor = hor
-            scaleVert = vert
             isRect = self.SegmentIsRect(outObj, pointOff, newPointOff)
             if not isRect:
-                scaleHor = max(hor, vert)
-                scaleVert = scaleHor
-            
-            for y in range(pointOff, newPointOff):
-                p = outObj.GetPoint(y)
-                locked = self.PointMakesBorder(p, c4d.Vector(0), size)
-                if not bool(locked.x) or not isRect:
-                    p.x = c4d.utils.RangeMap(scaleVert, 0.0, 1.0, 0.0, p.x, False)
-                if not bool(locked.y) or not isRect:
-                    p.y = c4d.utils.RangeMap(scaleHor, 0.0, 1.0, 0.0, p.y, False)
-                if not bool(locked.z) or not isRect:
-                    p.z = c4d.utils.RangeMap(scaleHor, 0.0, 1.0, 0.0, p.z, False)
-                outObj.SetPoint(y, p)
+                scale = min(hor, vert)
+                off = max(hor, vert)
+
+                movePoint = outObj.GetPoint(pointOff)
+                movedPoint = c4d.Vector()
+                movedPoint.x = c4d.utils.RangeMap(off, 0.0, 1.0, 0.0, movePoint.x, False)
+                movedPoint.y = c4d.utils.RangeMap(off, 0.0, 1.0, 0.0, movePoint.y, False)
+                movedPoint.z = c4d.utils.RangeMap(off, 0.0, 1.0, 0.0, movePoint.z, False)
+                moveDiff = movedPoint - movePoint
+                for y in range(pointOff, newPointOff):
+                    p = outObj.GetPoint(y)
+                    p += moveDiff
+                    p.x = c4d.utils.RangeMap(scale, 0.0, 1.0, 0.0, p.x, False)
+                    p.y = c4d.utils.RangeMap(scale, 0.0, 1.0, 0.0, p.y, False)
+                    p.z = c4d.utils.RangeMap(scale, 0.0, 1.0, 0.0, p.z, False)
+                    outObj.SetPoint(y, p)
+            else:
+                for y in range(pointOff, newPointOff):
+                    p = outObj.GetPoint(y)
+                    locked = self.PointMakesBorder(p, c4d.Vector(0), size)
+                    if not bool(locked.x):
+                        p.x = c4d.utils.RangeMap(vert, 0.0, 1.0, 0.0, p.x, False)
+                    if not bool(locked.y):
+                        p.y = c4d.utils.RangeMap(hor, 0.0, 1.0, 0.0, p.y, False)
+                    if not bool(locked.z):
+                        p.z = c4d.utils.RangeMap(hor, 0.0, 1.0, 0.0, p.z, False)
+                    outObj.SetPoint(y, p)
             
             pointOff = newPointOff
 
