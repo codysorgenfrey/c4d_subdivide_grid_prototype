@@ -112,38 +112,64 @@ class SubdivideGrid(c4d.plugins.ObjectData):
 
         return True
 
-    def RecursiveCollectInputs(self, op, hh, obj):
+    def RecursiveCollectInputs(self, op, hh, doc, obj):
         while obj:
-            obj.Touch()
-            if (obj.GetInfo() & c4d.OBJECT_ISSPLINE) and obj[c4d.ID_BASEOBJECT_GENERATOR_FLAG]:
-                if obj.GetType() == c4d.Ospline:
-                    spline = obj
+            if not obj[c4d.ID_BASEOBJECT_GENERATOR_FLAG]:
+                obj = obj.GetNext()
+                continue
+
+            if obj.GetType() == c4d.Ospline:
+                spline = obj
+            else:
+                objClone = obj.GetClone()
+                result = c4d.utils.SendModelingCommand(
+                    c4d.MCOMMAND_CURRENTSTATETOOBJECT,
+                    [objClone],
+                    c4d.MODELINGCOMMANDMODE_ALL,
+                    c4d.BaseContainer(),
+                    doc,
+                    c4d.MODELINGCOMMANDFLAGS_NONE,
+                    )
+                if result is not False:
+                    spline = result[0]
                 else:
                     spline = obj.GetRealSpline()
 
-                if spline is None:
-                    obj = obj.GetNext()
-                    continue
-                
-                pntCnt = spline.GetPointCount()
-                tanCnt = spline.GetTangentCount()
-                mySegCnt = self.INPUT_SPLINE.GetSegmentCount()
-                myPntCnt = self.INPUT_SPLINE.GetPointCount()
-                newPntCnt = myPntCnt + pntCnt
-                newSegCnt = mySegCnt + 1
-                objMarr = obj.GetMg()
+            if spline is None:
+                obj = obj.GetNext()
+                continue
+            if not (spline.GetInfo() & c4d.OBJECT_ISSPLINE):
+                obj = obj.GetNext()
+                continue
+            
+            segCnt = spline.GetSegmentCount()
+            pntCnt = spline.GetPointCount()
+            tanCnt = spline.GetTangentCount()
+            mySegCnt = self.INPUT_SPLINE.GetSegmentCount()
+            myPntCnt = self.INPUT_SPLINE.GetPointCount()
+            myTanCnt = self.INPUT_SPLINE.GetTangentCount()
+            newPntCnt = myPntCnt + pntCnt
+            newSegCnt = mySegCnt + segCnt
+            newTanCnt = myTanCnt + tanCnt
+            objMarr = obj.GetMl()
 
-                self.INPUT_SPLINE.ResizeObject(newPntCnt, newSegCnt)
-                for x in range(pntCnt):
-                    self.INPUT_SPLINE.SetPoint(myPntCnt + x, objMarr * spline.GetPoint(x))
+            self.INPUT_SPLINE.ResizeObject(newPntCnt, newSegCnt)
+            for x in range(myPntCnt, newPntCnt):
+                p = spline.GetPoint(x - myPntCnt)
+                self.INPUT_SPLINE.SetPoint(x, objMarr * p)
 
-                for x in range(tanCnt):
-                    tan = spline.GetTangent(x)
-                    self.INPUT_SPLINE.SetTangent(myPntCnt + x, tan['vl'], tan['vr'])
-                
-                self.INPUT_SPLINE.SetSegment(newSegCnt - 1, pntCnt, spline.IsClosed())
-                self.INPUT_SPLINE.Message(c4d.MSG_UPDATE) # because we updated its points
+            for x in range(myTanCnt, newTanCnt):
+                tan = spline.GetTangent(x - myTanCnt)
+                self.INPUT_SPLINE.SetTangent(x, tan['vl'], tan['vr'])
 
+            for x in range(mySegCnt, newSegCnt):
+                if x - mySegCnt < 0: # for splines with no segments
+                    self.INPUT_SPLINE.SetSegment(x, pntCnt, spline.IsClosed())
+                else:
+                    seg = spline.GetSegment(x - mySegCnt)
+                    self.INPUT_SPLINE.SetSegment(x, seg['cnt'], seg['closed'])
+            
+            self.INPUT_SPLINE.Message(c4d.MSG_UPDATE) # because we updated its points
             obj = obj.GetNext()
 
     def SegmentIsRect(self, obj, start, end):
@@ -252,20 +278,22 @@ class SubdivideGrid(c4d.plugins.ObjectData):
         return self.MakeSpline(op)
 
     def GetVirtualObjects(self, op, hh):
+        doc = op.GetDocument()
+        if doc is None: return None
+
         inObj = op.GetDown()
         if inObj is None:
             self.INPUT_SPLINE = None
             return None
 
-        hClone = op.GetAndCheckHierarchyClone(hh, inObj, c4d.HIERARCHYCLONEFLAGS_ASSPLINE, False)
-        doc = op.GetDocument()
+        hClone = op.GetAndCheckHierarchyClone(hh, inObj, c4d.HIERARCHYCLONEFLAGS_ASSPLINE, True)
         frame = doc.GetTime().GetFrame(doc.GetFps())
         if not hClone['dirty'] and frame == self.LAST_FRAME:
             return hClone['clone']
     
         self.INPUT_SPLINE = c4d.SplineObject(0, c4d.SPLINETYPE_BEZIER)
         self.INPUT_SPLINE[c4d.SPLINEOBJECT_CLOSED] = True
-        self.RecursiveCollectInputs(op, hh, inObj)
+        self.RecursiveCollectInputs(op, hh, doc, inObj)
 
         self.LAST_FRAME = frame
 
