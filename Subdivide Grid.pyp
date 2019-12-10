@@ -77,9 +77,6 @@ class SubdivideGrid(c4d.plugins.ObjectData):
     PLUGIN_DESC = 'Osubdividegrid'
     PLUGIN_ICON = load_bitmap('res/icons/subdivide grid.tiff')
     PLUGIN_DISKLEVEL = 0
-    LAST_FRAME = -1
-    INPUT_SPLINE = None
-    DRIVER = False
 
     @classmethod
     def Register(cls):
@@ -101,6 +98,15 @@ class SubdivideGrid(c4d.plugins.ObjectData):
         node[res_SG.SG_COMPLETE] = 100.0
         node[res_SG.SG_HOR] = 0.0
         node[res_SG.SG_VERT] = 0.0
+
+        if not hasattr(self, 'LAST_FRAME'):
+            self.LAST_FRAME = -1
+        if not hasattr(self, 'OUT_SPLINE'):
+            self.OUT_SPLINE = None
+        if not hasattr(self, 'IN_SPLINE'):
+            self.IN_SPLINE = None
+        if not hasattr(self, 'DRIVER'):
+            self.DRIVER = None
         
         return True
 
@@ -113,6 +119,9 @@ class SubdivideGrid(c4d.plugins.ObjectData):
         return True
 
     def RecursiveCollectInputs(self, op, hh, doc, obj):
+        inObj = c4d.SplineObject(0, c4d.SPLINETYPE_BEZIER)
+        inObj[c4d.SPLINEOBJECT_CLOSED] = True
+
         while obj:
             if not obj[c4d.ID_BASEOBJECT_GENERATOR_FLAG]:
                 obj = obj.GetNext()
@@ -145,32 +154,34 @@ class SubdivideGrid(c4d.plugins.ObjectData):
             segCnt = spline.GetSegmentCount()
             pntCnt = spline.GetPointCount()
             tanCnt = spline.GetTangentCount()
-            mySegCnt = self.INPUT_SPLINE.GetSegmentCount()
-            myPntCnt = self.INPUT_SPLINE.GetPointCount()
-            myTanCnt = self.INPUT_SPLINE.GetTangentCount()
+            mySegCnt = inObj.GetSegmentCount()
+            myPntCnt = inObj.GetPointCount()
+            myTanCnt = inObj.GetTangentCount()
             newPntCnt = myPntCnt + pntCnt
             newSegCnt = mySegCnt + segCnt
             newTanCnt = myTanCnt + tanCnt
             objMarr = obj.GetMl()
 
-            self.INPUT_SPLINE.ResizeObject(newPntCnt, newSegCnt)
+            inObj.ResizeObject(newPntCnt, newSegCnt)
             for x in range(myPntCnt, newPntCnt):
                 p = spline.GetPoint(x - myPntCnt)
-                self.INPUT_SPLINE.SetPoint(x, objMarr * p)
+                inObj.SetPoint(x, objMarr * p)
 
             for x in range(myTanCnt, newTanCnt):
                 tan = spline.GetTangent(x - myTanCnt)
-                self.INPUT_SPLINE.SetTangent(x, tan['vl'], tan['vr'])
+                inObj.SetTangent(x, tan['vl'], tan['vr'])
 
             for x in range(mySegCnt, newSegCnt):
                 if x - mySegCnt < 0: # for splines with no segments
-                    self.INPUT_SPLINE.SetSegment(x, pntCnt, spline.IsClosed())
+                    inObj.SetSegment(x, pntCnt, spline.IsClosed())
                 else:
                     seg = spline.GetSegment(x - mySegCnt)
-                    self.INPUT_SPLINE.SetSegment(x, seg['cnt'], seg['closed'])
+                    inObj.SetSegment(x, seg['cnt'], seg['closed'])
             
-            self.INPUT_SPLINE.Message(c4d.MSG_UPDATE) # because we updated its points
+            inObj.Message(c4d.MSG_UPDATE) # because we updated its points
             obj = obj.GetNext()
+
+        return inObj
 
     def SegmentIsRect(self, obj, start, end):
         isRect = True
@@ -203,8 +214,7 @@ class SubdivideGrid(c4d.plugins.ObjectData):
             makesBorder.z = 1
         return makesBorder
 
-    def MakeSpline(self, op):
-        doc = op.GetDocument()
+    def MakeSpline(self, doc, op, inObj):
         curTime = doc.GetTime()
         fps = doc.GetFps()
         horOff = c4d.BaseTime(op[res_SG.SG_HOR], fps)
@@ -234,8 +244,8 @@ class SubdivideGrid(c4d.plugins.ObjectData):
         hor = driver[res_SG.SG_COMPLETE]
         doc.AnimateObject(driver, curTime + vertOff + levelOff, c4d.ANIMATEFLAGS_NONE)
         vert = driver[res_SG.SG_COMPLETE]
-        outObj = self.INPUT_SPLINE.GetClone(c4d.COPYFLAGS_NONE)
-        size = self.INPUT_SPLINE.GetRad() * 2
+        outObj = inObj.GetClone(c4d.COPYFLAGS_NONE)
+        size = inObj.GetRad() * 2
 
         pointOff = 0
         segCount = outObj.GetSegmentCount()
@@ -274,30 +284,27 @@ class SubdivideGrid(c4d.plugins.ObjectData):
         return outObj
 
     def GetContour(self, op, doc, lod, bt):
-        if self.INPUT_SPLINE is None: return None
-        return self.MakeSpline(op)
+        if self.IN_SPLINE is None: return None
+        return self.MakeSpline(doc, op, self.IN_SPLINE) # has to be re-generated for some reason
 
     def GetVirtualObjects(self, op, hh):
         doc = op.GetDocument()
         if doc is None: return None
 
         inObj = op.GetDown()
-        if inObj is None:
-            self.INPUT_SPLINE = None
-            return None
+        if inObj is None: return None
 
         hClone = op.GetAndCheckHierarchyClone(hh, inObj, c4d.HIERARCHYCLONEFLAGS_ASSPLINE, True)
         frame = doc.GetTime().GetFrame(doc.GetFps())
         if not hClone['dirty'] and frame == self.LAST_FRAME:
             return hClone['clone']
     
-        self.INPUT_SPLINE = c4d.SplineObject(0, c4d.SPLINETYPE_BEZIER)
-        self.INPUT_SPLINE[c4d.SPLINEOBJECT_CLOSED] = True
-        self.RecursiveCollectInputs(op, hh, doc, inObj)
+        self.IN_SPLINE = self.RecursiveCollectInputs(op, hh, doc, inObj)
+        self.OUT_SPLINE = self.MakeSpline(doc, op, self.IN_SPLINE)
 
         self.LAST_FRAME = frame
 
-        return self.MakeSpline(op)
+        return self.OUT_SPLINE
 
 class SubdivideGridGroup(c4d.plugins.CommandData):
     PLUGIN_ID = 1054128
