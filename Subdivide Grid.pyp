@@ -54,15 +54,26 @@ class SubdivideGridDriver(c4d.plugins.TagData):
         node[res_SGD.SGD_OFF_MULT] = 1.0
         
         return True
+
+    def RecursiveSetDirty(self, obj):
+        while obj:
+            if obj.GetType() == SubdivideGrid.PLUGIN_ID:
+                obj.GetRealSpline()
+
+            child = obj.GetDown()
+            if child:
+                self.RecursiveSetDirty(child)
+            
+            obj = obj.GetNext()
     
     def Execute(self, tag, doc, op, bt, priority, flags):
-        # tag just holds values and drives animation
+        self.RecursiveSetDirty(op) # called to update objects on every frame for frame offsets
         return c4d.EXECUTIONRESULT_OK
 
 class SubdivideGrid(c4d.plugins.ObjectData):
     PLUGIN_ID = 1054108
     PLUGIN_NAME = 'Subdivide Grid'
-    PLUGIN_INFO = c4d.OBJECT_GENERATOR | c4d.OBJECT_ISSPLINE
+    PLUGIN_INFO = c4d.OBJECT_GENERATOR | c4d.OBJECT_INPUT | c4d.OBJECT_ISSPLINE
     PLUGIN_DESC = 'Osubdividegrid'
     PLUGIN_ICON = load_bitmap('res/icons/subdivide grid.tiff')
     PLUGIN_DISKLEVEL = 0
@@ -115,7 +126,6 @@ class SubdivideGrid(c4d.plugins.ObjectData):
             if obj.GetType() == c4d.Ospline:
                 spline = obj
             elif obj.GetType() == SubdivideGrid.PLUGIN_ID:
-                # spline = obj.GetCache()
                 spline = obj.GetRealSpline()
             else:
                 objClone = obj.GetClone()
@@ -288,19 +298,17 @@ class SubdivideGrid(c4d.plugins.ObjectData):
         inSpline = self.RecursiveCollectInputs(op, doc, inObj)
         return self.MakeSpline(doc, op, inSpline)
 
-    # def GetVirtualObjects(self, op, hh):
-    #     doc = op.GetDocument()
-    #     if doc is None: return None
+    def GetVirtualObjects(self, op, hh):
+        doc = op.GetDocument()
+        if doc is None: return None
 
-    #     inObj = op.GetDown()
-    #     if inObj is None: return None
+        inObj = op.GetDown()
+        if inObj is None: return None
 
-    #     hClone = op.GetAndCheckHierarchyClone(hh, inObj, c4d.HIERARCHYCLONEFLAGS_ASSPLINE, True)
-    #     if not hClone['dirty']: return hClone['clone']
-    
-    #     outSpline = self.GetContour(op, doc, None, None)
+        hClone = op.GetAndCheckHierarchyClone(hh, inObj, c4d.HIERARCHYCLONEFLAGS_ASSPLINE, True)
+        if not hClone['dirty']: return hClone['clone']
 
-    #     return outSpline
+        return self.GetContour(op, doc, None, None)
 
 class SubdivideGridGroup(c4d.plugins.CommandData):
     PLUGIN_ID = 1054128
