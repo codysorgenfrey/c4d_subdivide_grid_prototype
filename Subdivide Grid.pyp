@@ -56,13 +56,13 @@ class SubdivideGridDriver(c4d.plugins.TagData):
         return True
     
     def Execute(self, tag, doc, op, bt, priority, flags):
-        op.SetDirty(c4d.DIRTYFLAGS_DATA) # refresh every frame for time offsets
+        # tag just holds values and drives animation
         return c4d.EXECUTIONRESULT_OK
 
 class SubdivideGrid(c4d.plugins.ObjectData):
     PLUGIN_ID = 1054108
     PLUGIN_NAME = 'Subdivide Grid'
-    PLUGIN_INFO = c4d.OBJECT_GENERATOR | c4d.OBJECT_INPUT | c4d.OBJECT_ISSPLINE
+    PLUGIN_INFO = c4d.OBJECT_GENERATOR | c4d.OBJECT_ISSPLINE
     PLUGIN_DESC = 'Osubdividegrid'
     PLUGIN_ICON = load_bitmap('res/icons/subdivide grid.tiff')
     PLUGIN_DISKLEVEL = 0
@@ -114,6 +114,9 @@ class SubdivideGrid(c4d.plugins.ObjectData):
 
             if obj.GetType() == c4d.Ospline:
                 spline = obj
+            elif obj.GetType() == SubdivideGrid.PLUGIN_ID:
+                # spline = obj.GetCache()
+                spline = obj.GetRealSpline()
             else:
                 objClone = obj.GetClone()
                 result = c4d.utils.SendModelingCommand(
@@ -199,6 +202,13 @@ class SubdivideGrid(c4d.plugins.ObjectData):
             makesBorder.z = 1
         return makesBorder
 
+    def CompletionAtTime(self, obj, doc, time):
+        cTrack = obj.FindCTrack(res_SGD.SGD_COMPLETE)
+        if cTrack is None:
+            return obj[res_SGD.SGD_COMPLETE]
+        
+        return cTrack.GetValue(doc, time, doc.GetFps())
+
     def MakeSpline(self, doc, op, inObj):
         curTime = doc.GetTime()
         fps = doc.GetFps()
@@ -225,10 +235,8 @@ class SubdivideGrid(c4d.plugins.ObjectData):
             offsetStep *= offsetMult
 
         levelOff = c4d.BaseTime(offsetStep * level, fps)
-        doc.AnimateObject(driver, curTime + horOff + levelOff, c4d.ANIMATEFLAGS_NONE)
-        hor = driver[res_SG.SG_COMPLETE]
-        doc.AnimateObject(driver, curTime + vertOff + levelOff, c4d.ANIMATEFLAGS_NONE)
-        vert = driver[res_SG.SG_COMPLETE]
+        hor = self.CompletionAtTime(driver, doc, curTime + horOff + levelOff)
+        vert = self.CompletionAtTime(driver, doc, curTime + vertOff + levelOff)
         outObj = inObj.GetClone()
         size = inObj.GetRad() * 2
 
@@ -268,27 +276,31 @@ class SubdivideGrid(c4d.plugins.ObjectData):
         outObj.Message(c4d.MSG_UPDATE)
         return outObj
 
+    def CheckDirty(self, op, doc):
+        frame = doc.GetTime().GetFrame(doc.GetFps())
+        if self.LAST_FRAME != frame:
+            self.LAST_FRAME = frame
+            op.SetDirty(c4d.DIRTYFLAGS_DATA)
+
     def GetContour(self, op, doc, lod, bt):
         inObj = op.GetDown()
         if inObj is None: return None
         inSpline = self.RecursiveCollectInputs(op, doc, inObj)
         return self.MakeSpline(doc, op, inSpline)
 
-    def GetVirtualObjects(self, op, hh):
-        doc = op.GetDocument()
-        if doc is None: return None
+    # def GetVirtualObjects(self, op, hh):
+    #     doc = op.GetDocument()
+    #     if doc is None: return None
 
-        inObj = op.GetDown()
-        if inObj is None: return None
+    #     inObj = op.GetDown()
+    #     if inObj is None: return None
 
-        hClone = op.GetAndCheckHierarchyClone(hh, inObj, c4d.HIERARCHYCLONEFLAGS_ASSPLINE, True)
-        if not hClone['dirty']: return hClone['clone']
+    #     hClone = op.GetAndCheckHierarchyClone(hh, inObj, c4d.HIERARCHYCLONEFLAGS_ASSPLINE, True)
+    #     if not hClone['dirty']: return hClone['clone']
     
-        outSpline = self.GetContour(op, doc, None, None)
-        outObj = c4d.BaseObject(c4d.Onull)
-        outSpline.InsertUnder(outObj)
+    #     outSpline = self.GetContour(op, doc, None, None)
 
-        return outObj
+    #     return outSpline
 
 class SubdivideGridGroup(c4d.plugins.CommandData):
     PLUGIN_ID = 1054128
