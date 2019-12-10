@@ -54,20 +54,9 @@ class SubdivideGridDriver(c4d.plugins.TagData):
         node[res_SGD.SGD_OFF_MULT] = 1.0
         
         return True
-
-    def RecursiveSetDirty(self, obj):
-        while obj:
-            if obj.GetType() == SubdivideGrid.PLUGIN_ID:
-                obj.SetDirty(c4d.DIRTYFLAGS_DATA)
-
-            child = obj.GetDown()
-            if child:
-                self.RecursiveSetDirty(child)
-            obj = obj.GetNext()
     
     def Execute(self, tag, doc, op, bt, priority, flags):
-        obj = op.GetDown() # start down cause tag changes already mark op as dirty
-        self.RecursiveSetDirty(obj) 
+        op.SetDirty(c4d.DIRTYFLAGS_DATA) # refresh every frame for time offsets
         return c4d.EXECUTIONRESULT_OK
 
 class SubdivideGrid(c4d.plugins.ObjectData):
@@ -101,10 +90,6 @@ class SubdivideGrid(c4d.plugins.ObjectData):
 
         if not hasattr(self, 'LAST_FRAME'):
             self.LAST_FRAME = -1
-        if not hasattr(self, 'OUT_SPLINE'):
-            self.OUT_SPLINE = None
-        if not hasattr(self, 'IN_SPLINE'):
-            self.IN_SPLINE = None
         if not hasattr(self, 'DRIVER'):
             self.DRIVER = None
         
@@ -119,7 +104,6 @@ class SubdivideGrid(c4d.plugins.ObjectData):
         return True
 
     def RecursiveCollectInputs(self, op, doc, obj):
-        print "%s: collect inputs" % op.GetName()
         inObj = c4d.SplineObject(0, c4d.SPLINETYPE_BEZIER)
         inObj[c4d.SPLINEOBJECT_CLOSED] = True
 
@@ -146,11 +130,9 @@ class SubdivideGrid(c4d.plugins.ObjectData):
                     spline = obj.GetRealSpline()
 
             if spline is None:
-                print "%s is None" % (obj.GetName())
                 obj = obj.GetNext()
                 continue
             if not (spline.GetInfo() & c4d.OBJECT_ISSPLINE):
-                print "%s is not spline" % (obj.GetName())
                 obj = obj.GetNext()
                 continue
             
@@ -218,7 +200,6 @@ class SubdivideGrid(c4d.plugins.ObjectData):
         return makesBorder
 
     def MakeSpline(self, doc, op, inObj):
-        print "%s: Make spline" % op.GetName()
         curTime = doc.GetTime()
         fps = doc.GetFps()
         horOff = c4d.BaseTime(op[res_SG.SG_HOR], fps)
@@ -288,17 +269,10 @@ class SubdivideGrid(c4d.plugins.ObjectData):
         return outObj
 
     def GetContour(self, op, doc, lod, bt):
-        print "%s: contour" % op.GetName()
-        if self.IN_SPLINE is None:
-            print "%s: contour in spline is none" % op.GetName()
-            inObj = op.GetDown()
-            if inObj is None: return None
-            self.IN_SPLINE = self.RecursiveCollectInputs(op, doc, inObj)
-        
-        if self.OUT_SPLINE is None:
-            self.OUT_SPLINE = self.MakeSpline(doc, op, self.IN_SPLINE)
-
-        return self.OUT_SPLINE
+        inObj = op.GetDown()
+        if inObj is None: return None
+        inSpline = self.RecursiveCollectInputs(op, doc, inObj)
+        return self.MakeSpline(doc, op, inSpline)
 
     def GetVirtualObjects(self, op, hh):
         doc = op.GetDocument()
@@ -308,18 +282,11 @@ class SubdivideGrid(c4d.plugins.ObjectData):
         if inObj is None: return None
 
         hClone = op.GetAndCheckHierarchyClone(hh, inObj, c4d.HIERARCHYCLONEFLAGS_ASSPLINE, True)
-        frame = doc.GetTime().GetFrame(doc.GetFps())
-        if not hClone['dirty'] and frame == self.LAST_FRAME:
-            return hClone['clone']
+        if not hClone['dirty']: return hClone['clone']
     
-        print "%s: GVO" % op.GetName()
-        self.IN_SPLINE = self.RecursiveCollectInputs(op, doc, inObj)
-        self.OUT_SPLINE = self.MakeSpline(doc, op, self.IN_SPLINE)
-
-        self.LAST_FRAME = frame
-
+        outSpline = self.GetContour(op, doc, None, None)
         outObj = c4d.BaseObject(c4d.Onull)
-        self.OUT_SPLINE.InsertUnder(outObj)
+        outSpline.InsertUnder(outObj)
 
         return outObj
 
