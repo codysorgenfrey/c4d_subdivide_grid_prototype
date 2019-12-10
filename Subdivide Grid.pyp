@@ -118,7 +118,8 @@ class SubdivideGrid(c4d.plugins.ObjectData):
 
         return True
 
-    def RecursiveCollectInputs(self, op, hh, doc, obj):
+    def RecursiveCollectInputs(self, op, doc, obj):
+        print "%s: collect inputs" % op.GetName()
         inObj = c4d.SplineObject(0, c4d.SPLINETYPE_BEZIER)
         inObj[c4d.SPLINEOBJECT_CLOSED] = True
 
@@ -145,9 +146,11 @@ class SubdivideGrid(c4d.plugins.ObjectData):
                     spline = obj.GetRealSpline()
 
             if spline is None:
+                print "%s is None" % (obj.GetName())
                 obj = obj.GetNext()
                 continue
             if not (spline.GetInfo() & c4d.OBJECT_ISSPLINE):
+                print "%s is not spline" % (obj.GetName())
                 obj = obj.GetNext()
                 continue
             
@@ -215,6 +218,7 @@ class SubdivideGrid(c4d.plugins.ObjectData):
         return makesBorder
 
     def MakeSpline(self, doc, op, inObj):
+        print "%s: Make spline" % op.GetName()
         curTime = doc.GetTime()
         fps = doc.GetFps()
         horOff = c4d.BaseTime(op[res_SG.SG_HOR], fps)
@@ -229,11 +233,11 @@ class SubdivideGrid(c4d.plugins.ObjectData):
             tag = parent.GetTag(SubdivideGridDriver.PLUGIN_ID)
             parent = parent.GetUp()
 
-        driver = op.GetClone(c4d.COPYFLAGS_NONE)
+        driver = op.GetClone()
         self.DRIVER = False
         offsetStep = 0.0
         if tag is not None:
-            driver = tag.GetClone(c4d.COPYFLAGS_NONE)
+            driver = tag.GetClone()
             self.DRIVER = True
             offsetStep = tag[res_SGD.SGD_OFF]
             offsetMult = tag[res_SGD.SGD_OFF_MULT]
@@ -244,7 +248,7 @@ class SubdivideGrid(c4d.plugins.ObjectData):
         hor = driver[res_SG.SG_COMPLETE]
         doc.AnimateObject(driver, curTime + vertOff + levelOff, c4d.ANIMATEFLAGS_NONE)
         vert = driver[res_SG.SG_COMPLETE]
-        outObj = inObj.GetClone(c4d.COPYFLAGS_NONE)
+        outObj = inObj.GetClone()
         size = inObj.GetRad() * 2
 
         pointOff = 0
@@ -284,8 +288,17 @@ class SubdivideGrid(c4d.plugins.ObjectData):
         return outObj
 
     def GetContour(self, op, doc, lod, bt):
-        if self.IN_SPLINE is None: return None
-        return self.MakeSpline(doc, op, self.IN_SPLINE) # has to be re-generated for some reason
+        print "%s: contour" % op.GetName()
+        if self.IN_SPLINE is None:
+            print "%s: contour in spline is none" % op.GetName()
+            inObj = op.GetDown()
+            if inObj is None: return None
+            self.IN_SPLINE = self.RecursiveCollectInputs(op, doc, inObj)
+        
+        if self.OUT_SPLINE is None:
+            self.OUT_SPLINE = self.MakeSpline(doc, op, self.IN_SPLINE)
+
+        return self.OUT_SPLINE
 
     def GetVirtualObjects(self, op, hh):
         doc = op.GetDocument()
@@ -299,12 +312,16 @@ class SubdivideGrid(c4d.plugins.ObjectData):
         if not hClone['dirty'] and frame == self.LAST_FRAME:
             return hClone['clone']
     
-        self.IN_SPLINE = self.RecursiveCollectInputs(op, hh, doc, inObj)
+        print "%s: GVO" % op.GetName()
+        self.IN_SPLINE = self.RecursiveCollectInputs(op, doc, inObj)
         self.OUT_SPLINE = self.MakeSpline(doc, op, self.IN_SPLINE)
 
         self.LAST_FRAME = frame
 
-        return self.OUT_SPLINE
+        outObj = c4d.BaseObject(c4d.Onull)
+        self.OUT_SPLINE.InsertUnder(outObj)
+
+        return outObj
 
 class SubdivideGridGroup(c4d.plugins.CommandData):
     PLUGIN_ID = 1054128
