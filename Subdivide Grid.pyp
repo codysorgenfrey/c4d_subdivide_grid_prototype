@@ -280,6 +280,9 @@ class SubdivideGrid(c4d.plugins.ObjectData):
                 else:
                     scaledDims[y].y = dims[y].y
 
+            if not isRect:
+                aspectRatio = (dims[0].x - dims[1].x) / (dims[0].y - dims[1].y)
+
             for y in range(pointOff, newPointOff):
                 p = outObj.GetPoint(y)
                 p.x = c4d.utils.RangeMap(p.x, dims[0].x, dims[1].x, scaledDims[0].x, scaledDims[1].x, False)
