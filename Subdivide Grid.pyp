@@ -279,9 +279,21 @@ class SubdivideGrid(c4d.plugins.ObjectData):
                     scaledDims[y].y = c4d.utils.RangeMap(hor, 0.0, 1.0, 0.0, dims[y].y, False)
                 else:
                     scaledDims[y].y = dims[y].y
-
+            
             if not isRect:
-                aspectRatio = (dims[0].x - dims[1].x) / (dims[0].y - dims[1].y)
+                width = scaledDims[0].x - scaledDims[1].x
+                height = scaledDims[0].y - scaledDims[1].y
+                scale = min(width, height)
+                locked = self.PointMakesBorder(scaledDims[0], c4d.Vector(), size)
+                if not bool(locked.x):
+                    scaledDims[0].x = scaledDims[1].x + scale
+                if not bool(locked.y):
+                    scaledDims[0].y = scaledDims[1].y + scale
+                locked = self.PointMakesBorder(scaledDims[1], c4d.Vector(), size)
+                if not bool(locked.x):
+                    scaledDims[1].x = scaledDims[0].x - scale
+                if not bool(locked.y):
+                    scaledDims[1].y = scaledDims[0].y - scale
 
             for y in range(pointOff, newPointOff):
                 p = outObj.GetPoint(y)
