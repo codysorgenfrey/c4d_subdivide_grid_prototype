@@ -202,14 +202,24 @@ class SubdivideGrid(c4d.plugins.ObjectData):
 
         return isRect
 
+    def GetSegmentDims(self, obj, start, end):
+        trb = obj.GetPoint(start)
+        blf = obj.GetPoint(start)
+        for x in range(start, end):
+            p = obj.GetPoint(x)
+            trb.x = max(trb.x, p.x)
+            trb.y = max(trb.y, p.y)
+            blf.x = min(blf.x, p.x)
+            blf.y = min(blf.y, p.y)
+
+        return [trb, blf]
+
     def PointMakesBorder(self, p, boundsMin, boundMax):
         makesBorder = c4d.Vector(0)
         if isclose(p.x, boundsMin.x) or isclose(abs(p.x), boundMax.x):
             makesBorder.x = 1
         if isclose(p.y, boundsMin.y) or isclose(abs(p.y), boundMax.y):
             makesBorder.y = 1
-        if isclose(p.z, boundsMin.z) or isclose(abs(p.z), boundMax.z):
-            makesBorder.z = 1
         return makesBorder
 
     def CompletionAtTime(self, obj, doc, time):
@@ -256,30 +266,25 @@ class SubdivideGrid(c4d.plugins.ObjectData):
             seg = outObj.GetSegment(x)
             newPointOff = pointOff + seg['cnt']
             isRect = self.SegmentIsRect(outObj, pointOff, newPointOff)
-            if not isRect:
-                scale = min(hor, vert)
-                movePoint = outObj.GetPoint(pointOff)
-                movedPoint = c4d.Vector()
-                movedPoint.x = c4d.utils.RangeMap(vert, 0.0, 1.0, 0.0, movePoint.x, False)
-                movedPoint.y = c4d.utils.RangeMap(hor, 0.0, 1.0, 0.0, movePoint.y, False)
-                movedPoint.z = c4d.utils.RangeMap(hor, 0.0, 1.0, 0.0, movePoint.z, False)
-                for y in range(pointOff, newPointOff):
-                    p = outObj.GetPoint(y)
-                    scaleDiff = p - movePoint
-                    scaleOff = scaleDiff * scale
-                    p = movedPoint + scaleOff
-                    outObj.SetPoint(y, p)
-            else:
-                for y in range(pointOff, newPointOff):
-                    p = outObj.GetPoint(y)
-                    locked = self.PointMakesBorder(p, c4d.Vector(0), size)
-                    if not bool(locked.x):
-                        p.x = c4d.utils.RangeMap(vert, 0.0, 1.0, 0.0, p.x, False)
-                    if not bool(locked.y):
-                        p.y = c4d.utils.RangeMap(hor, 0.0, 1.0, 0.0, p.y, False)
-                    if not bool(locked.z):
-                        p.z = c4d.utils.RangeMap(hor, 0.0, 1.0, 0.0, p.z, False)
-                    outObj.SetPoint(y, p)
+            dims = self.GetSegmentDims(outObj, pointOff, newPointOff)
+            scaledDims = [c4d.Vector(), c4d.Vector()]
+
+            for y in range(len(dims)):
+                locked = self.PointMakesBorder(dims[y], c4d.Vector(0), size)
+                if not bool(locked.x):
+                    scaledDims[y].x = c4d.utils.RangeMap(vert, 0.0, 1.0, 0.0, dims[y].x, False)
+                else:
+                    scaledDims[y].x = dims[y].x
+                if not bool(locked.y):
+                    scaledDims[y].y = c4d.utils.RangeMap(hor, 0.0, 1.0, 0.0, dims[y].y, False)
+                else:
+                    scaledDims[y].y = dims[y].y
+
+            for y in range(pointOff, newPointOff):
+                p = outObj.GetPoint(y)
+                p.x = c4d.utils.RangeMap(p.x, dims[0].x, dims[1].x, scaledDims[0].x, scaledDims[1].x, False)
+                p.y = c4d.utils.RangeMap(p.y, dims[0].y, dims[1].y, scaledDims[0].y, scaledDims[1].y, False)
+                outObj.SetPoint(y, p)
             
             pointOff = newPointOff
 
@@ -309,7 +314,7 @@ class SubdivideGrid(c4d.plugins.ObjectData):
         if not hClone['dirty']: return hClone['clone']
 
         return self.GetContour(op, doc, None, None)
-
+        
 class SubdivideGridGroup(c4d.plugins.CommandData):
     PLUGIN_ID = 1054128
     PLUGIN_NAME = 'Subdivide Grid Group'
