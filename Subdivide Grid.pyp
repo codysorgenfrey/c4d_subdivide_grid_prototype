@@ -1,6 +1,7 @@
 # Copyright (C) 2019 Cody Sorgenfrey
 import c4d # pylint: disable=import-error
 import os
+import math
 
 class res_SG(object):
     SG_COMPLETE = 1000
@@ -329,31 +330,123 @@ class SubdivideGrid(c4d.plugins.ObjectData):
         if not hClone['dirty']: return hClone['clone']
 
         return self.GetContour(op, doc, None, None)
-        
-class SubdivideGridGroup(c4d.plugins.CommandData):
+
+class SubdivideGridExtrude(c4d.plugins.ObjectData):
     PLUGIN_ID = 1054128
-    PLUGIN_NAME = 'Subdivide Grid Group'
-    PLUGIN_HELP = 'Group selected objects under a Subdivide Grid'
-    PLUGIN_INFO = 0
+    PLUGIN_NAME = 'Subdivide Grid Extrude'
+    PLUGIN_INFO = c4d.OBJECT_GENERATOR | c4d.OBJECT_INPUT
+    PLUGIN_DESC = 'Osubdividegridextrude'
     PLUGIN_ICON = load_bitmap('res/icons/subdivide grid.tiff')
     PLUGIN_DISKLEVEL = 0
 
     @classmethod
     def Register(cls):
-        return c4d.plugins.RegisterCommandPlugin(
+        return c4d.plugins.RegisterObjectPlugin(
             cls.PLUGIN_ID,
             cls.PLUGIN_NAME,
+            cls,
+            cls.PLUGIN_DESC,
             cls.PLUGIN_INFO,
             cls.PLUGIN_ICON,
-            cls.PLUGIN_HELP,
-            SubdivideGridGroup(),
+            cls.PLUGIN_DISKLEVEL
         )
 
-    def Execute(self, doc):
-        # to be written
+    def Init(self, node):
         return True
+
+    def GetVirtualObjects(self, op, hh):
+        doc = op.GetDocument()
+        if doc is None: return None
+
+        inObj = op.GetDown()
+        if inObj is None: return None
+
+        hClone = op.GetAndCheckHierarchyClone(hh, inObj, c4d.HIERARCHYCLONEFLAGS_ASSPLINE, False)
+        if not hClone['dirty']: return hClone['clone']
+
+        inSpline = hClone['clone']
+        if inSpline is None: return None
+
+        movement = c4d.Vector(0, 0, -10)
+
+        inPointCount = inSpline.GetPointCount()
+        points = []
+        polys = []
+        segCount = inSpline.GetSegmentCount()
+        if segCount == 0:
+            inSpline.ResizeObject(inPointCount, 1)
+            inSpline.SetSegment(0, inPointCount, inSpline.IsClosed())
+            segCount = 1
+        pointOff = 0
+        inMarr = inSpline.GetMl()
+
+        # points
+        for x in range(segCount):
+            seg = inSpline.GetSegment(x)
+            newPointOff = pointOff + seg['cnt']
+            for y in range(pointOff, newPointOff):
+                p = inSpline.GetPoint(y) * inMarr
+                points.append(p)
+                points.append(p + movement)
+            pointOff = newPointOff
+
+        # polys
+        pointOff = 0
+        for x in range(segCount):
+            seg = inSpline.GetSegment(x)
+            newPointOff = pointOff + seg['cnt']
+            polyGroupPointCount = newPointOff * 2
+            for y in range(pointOff, newPointOff):
+                p1 = (y * 2)
+                if p1 >= polyGroupPointCount: p1 = pointOff
+                p2 = p1 + 1
+                if p2 >= polyGroupPointCount: p2 = pointOff
+                p4 = p2 + 1
+                if p4 >= polyGroupPointCount: p4 = pointOff
+                p3 = p4 + 1
+                if p3 >= polyGroupPointCount: p3 = pointOff
+                polys.append(c4d.CPolygon(p1, p2, p3, p4))
+            pointOff = newPointOff
+
+        # caps
+        pointOff = 0
+        for x in range(segCount):
+            seg = inSpline.GetSegment(x)
+            newPointOff = pointOff + seg['cnt']
+            polyGroupPointCount = newPointOff * 2
+            triCount = int(math.ceil(float(seg['cnt']) / 3))
+            for y in range(triCount):
+                # back cap
+                p1 = 0 + (y * 3)
+                if p1 % 2 == 1: p1 += 1
+                if p1 >= polyGroupPointCount: p1 = pointOff
+                p2 = p1 + 2
+                if p2 >= polyGroupPointCount: p2 = pointOff
+                p3 = p2 + 2
+                if p3 >= polyGroupPointCount: p3 = pointOff
+                polys.append(c4d.CPolygon(p1, p2, p3))
+                
+                # front cap
+                p1 = 1 + (y * 3)
+                if p1 % 2 == 0: p1 += 1
+                if p1 >= polyGroupPointCount: p1 = pointOff + 1
+                p2 = p1 + 2
+                if p2 >= polyGroupPointCount: p2 = pointOff + 1
+                p3 = p2 + 2
+                if p3 >= polyGroupPointCount: p3 = pointOff + 1
+                polys.append(c4d.CPolygon(p3, p2, p1))
+                
+            pointOff = newPointOff
+
+        outObj = c4d.PolygonObject(len(points), len(polys))
+        outObj.SetAllPoints(points)
+        for x, poly in enumerate(polys):
+            outObj.SetPolygon(x, poly)
+        outObj.Message(c4d.MSG_UPDATE)
+
+        return outObj
 
 if __name__ == '__main__':
     SubdivideGrid.Register()
     SubdivideGridDriver.Register()
-    SubdivideGridGroup.Register()
+    SubdivideGridExtrude.Register()
