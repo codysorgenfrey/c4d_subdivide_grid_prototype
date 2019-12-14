@@ -144,6 +144,37 @@ class SubdivideGrid(c4d.plugins.ObjectData):
 
         return True
 
+    def MergeSplines(self, spline1, spline2):
+        segCnt = spline1.GetSegmentCount()
+        pntCnt = spline1.GetPointCount()
+        tanCnt = spline1.GetTangentCount()
+        segCnt2 = spline2.GetSegmentCount()
+        pntCnt2 = spline2.GetPointCount()
+        tanCnt2 = spline2.GetTangentCount()
+        newPntCnt = pntCnt2 + pntCnt
+        newSegCnt = segCnt2 + segCnt
+        newTanCnt = tanCnt2 + tanCnt
+        objMarr = spline2.GetMl()
+
+        spline1.ResizeObject(newPntCnt, newSegCnt)
+        for x in range(pntCnt2, newPntCnt):
+            p = spline2.GetPoint(x - pntCnt2)
+            spline1.SetPoint(x, objMarr * p)
+
+        for x in range(tanCnt2, newTanCnt):
+            tan = spline2.GetTangent(x - tanCnt2)
+            spline1.SetTangent(x, tan['vl'], tan['vr'])
+
+        for x in range(segCnt2, newSegCnt):
+            if x - segCnt2 < 0: # for splines with no segments
+                spline1.SetSegment(x, pntCnt, spline2.IsClosed())
+            else:
+                seg = spline2.GetSegment(x - segCnt2)
+                spline1.SetSegment(x, seg['cnt'], seg['closed'])
+        
+        spline1.Message(c4d.MSG_UPDATE) # because we updated its points
+        return spline1
+
     def RecursiveCollectInputs(self, op, doc, obj):
         inObj = c4d.SplineObject(0, c4d.SPLINETYPE_BEZIER)
         inObj[c4d.SPLINEOBJECT_CLOSED] = True
@@ -158,34 +189,14 @@ class SubdivideGrid(c4d.plugins.ObjectData):
                 obj = obj.GetNext()
                 continue
 
-            segCnt = spline.GetSegmentCount()
-            pntCnt = spline.GetPointCount()
-            tanCnt = spline.GetTangentCount()
-            mySegCnt = inObj.GetSegmentCount()
-            myPntCnt = inObj.GetPointCount()
-            myTanCnt = inObj.GetTangentCount()
-            newPntCnt = myPntCnt + pntCnt
-            newSegCnt = mySegCnt + segCnt
-            newTanCnt = myTanCnt + tanCnt
-            objMarr = obj.GetMl()
+            inObj = self.MergeSplines(inObj, spline)
 
-            inObj.ResizeObject(newPntCnt, newSegCnt)
-            for x in range(myPntCnt, newPntCnt):
-                p = spline.GetPoint(x - myPntCnt)
-                inObj.SetPoint(x, objMarr * p)
+            # child = obj.GetDown()
+            # if child is not None:
+            #     if child.GetType() == c4d.Onull:
+            #         childSpline = self.RecursiveCollectInputs(op, doc, child)
+            #         inObj = self.MergeSplines(inObj, childSpline)
 
-            for x in range(myTanCnt, newTanCnt):
-                tan = spline.GetTangent(x - myTanCnt)
-                inObj.SetTangent(x, tan['vl'], tan['vr'])
-
-            for x in range(mySegCnt, newSegCnt):
-                if x - mySegCnt < 0: # for splines with no segments
-                    inObj.SetSegment(x, pntCnt, spline.IsClosed())
-                else:
-                    seg = spline.GetSegment(x - mySegCnt)
-                    inObj.SetSegment(x, seg['cnt'], seg['closed'])
-            
-            inObj.Message(c4d.MSG_UPDATE) # because we updated its points
             obj = obj.GetNext()
 
         return inObj
