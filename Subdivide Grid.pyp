@@ -312,26 +312,13 @@ class SubdivideGrid(c4d.plugins.ObjectData):
             pointOff = newPointOff
 
         outObj.Message(c4d.MSG_UPDATE)
-        return outObj
-
-    def GetSpline(self, doc, op, inObj):
-        inSpline = self.RecursiveCollectInputs(op, doc, inObj)
-        if inSpline is None: return None
-        outObj = inSpline.GetClone()
-        return self.AnimateGrid(doc, op, inSpline, outObj)
-        
+        return outObj        
 
     def GetCap(self, op, doc, inObj):
-        inSpline = self.RecursiveCollectInputs(op, doc, inObj)
-        if inSpline is None: return None
-        outObj = inSpline.GetClone()
-        animatedSpline = self.AnimateGrid(doc, op, inSpline, outObj)
         splineHelp = c4d.utils.SplineHelp()
-        splineHelp.InitSplineWith(animatedSpline, c4d.SPLINEHELPFLAGS_GLOBALSPACE | c4d.SPLINEHELPFLAGS_CONTINUECURVE | c4d.SPLINEHELPFLAGS_RETAINLINEOBJECT)
+        splineHelp.InitSplineWith(inObj, c4d.SPLINEHELPFLAGS_GLOBALSPACE | c4d.SPLINEHELPFLAGS_CONTINUECURVE | c4d.SPLINEHELPFLAGS_RETAINLINEOBJECT)
         lineObj = splineHelp.GetLineObject()
-        polyCap = lineObj.Triangulate(0.0)
-        
-        return self.AnimateGrid(doc, op, inSpline, polyCap)
+        return lineObj.Triangulate(0.0)
 
     def CheckDirty(self, op, doc):
         frame = doc.GetTime().GetFrame(doc.GetFps())
@@ -342,7 +329,9 @@ class SubdivideGrid(c4d.plugins.ObjectData):
     def GetContour(self, op, doc, lod, bt):
         inObj = op.GetDown()
         if inObj is None: return None
-        return self.GetSpline(doc, op, inObj)
+        inSpline = self.RecursiveCollectInputs(op, doc, inObj)
+        outObj = inSpline.GetClone()
+        return self.AnimateGrid(doc, op, inSpline, outObj)
 
     def GetVirtualObjects(self, op, hh):
         doc = op.GetDocument()
@@ -354,12 +343,20 @@ class SubdivideGrid(c4d.plugins.ObjectData):
         hClone = op.GetAndCheckHierarchyClone(hh, inObj, c4d.HIERARCHYCLONEFLAGS_ASSPLINE, True)
         if not hClone['dirty']: return hClone['clone']
 
-        cap = op[res_SG.SG_CAP]
+        inSpline = self.RecursiveCollectInputs(op, doc, inObj)
+        if inSpline is None: return None
 
-        if not cap:
-            return self.GetContour(op, doc, None, None)
+        cap = op[res_SG.SG_CAP]
+        if cap:
+            outGeo = self.GetCap(op, doc, inSpline)
+            phong = outGeo.GetTag(c4d.Tphong)
+            phong[c4d.PHONGTAG_PHONG_ANGLELIMIT] = True
+            phong[c4d.PHONGTAG_PHONG_ANGLE] = c4d.utils.DegToRad(89.0)
+            phong[c4d.PHONGTAG_PHONG_USEEDGES] = False
         else:
-            return self.GetCap(op, doc, inObj)
+            outGeo = inSpline.GetClone()
+
+        return self.AnimateGrid(doc, op, inSpline, outGeo)
 
 class SubdivideGridExtrude(c4d.plugins.ObjectData):
     PLUGIN_ID = 1054128
