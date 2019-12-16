@@ -157,19 +157,19 @@ class SubdivideGrid(c4d.plugins.ObjectData):
         objMarr = spline2.GetMl()
 
         spline1.ResizeObject(newPntCnt, newSegCnt)
-        for x in range(pntCnt2, newPntCnt):
-            p = spline2.GetPoint(x - pntCnt2)
+        for x in range(pntCnt, newPntCnt):
+            p = spline2.GetPoint(x - pntCnt)
             spline1.SetPoint(x, objMarr * p)
 
-        for x in range(tanCnt2, newTanCnt):
-            tan = spline2.GetTangent(x - tanCnt2)
+        for x in range(tanCnt, newTanCnt):
+            tan = spline2.GetTangent(x - tanCnt)
             spline1.SetTangent(x, tan['vl'], tan['vr'])
 
-        for x in range(segCnt2, newSegCnt):
-            if x - segCnt2 < 0: # for splines with no segments
+        for x in range(segCnt, newSegCnt):
+            if x - segCnt < 0: # for splines with no segments
                 spline1.SetSegment(x, pntCnt, spline2.IsClosed())
             else:
-                seg = spline2.GetSegment(x - segCnt2)
+                seg = spline2.GetSegment(x - segCnt)
                 spline1.SetSegment(x, seg['cnt'], seg['closed'])
         
         spline1.Message(c4d.MSG_UPDATE) # because we updated its points
@@ -180,7 +180,14 @@ class SubdivideGrid(c4d.plugins.ObjectData):
         inObj[c4d.SPLINEOBJECT_CLOSED] = True
 
         while obj:
-            if not obj[c4d.ID_BASEOBJECT_GENERATOR_FLAG]:
+            # if obj.GetType() == c4d.Onull:
+            #     child = obj.GetDown()
+            #     if child is not None:
+            #         childSpline = self.RecursiveCollectInputs(op, doc, child)
+            #         inObj = self.MergeSplines(inObj, childSpline)
+
+            info = obj.GetInfo()
+            if (info & c4d.OBJECT_GENERATOR) and not obj[c4d.ID_BASEOBJECT_GENERATOR_FLAG]:
                 obj = obj.GetNext()
                 continue
 
@@ -190,12 +197,6 @@ class SubdivideGrid(c4d.plugins.ObjectData):
                 continue
 
             inObj = self.MergeSplines(inObj, spline)
-
-            # child = obj.GetDown()
-            # if child is not None:
-            #     if child.GetType() == c4d.Onull:
-            #         childSpline = self.RecursiveCollectInputs(op, doc, child)
-            #         inObj = self.MergeSplines(inObj, childSpline)
 
             obj = obj.GetNext()
 
@@ -249,7 +250,7 @@ class SubdivideGrid(c4d.plugins.ObjectData):
         
         return cTrack.GetValue(doc, time, doc.GetFps())
 
-    def AnimateGrid(self, doc, op, inSpline, outObj):
+    def AnimateGrid(self, doc, op, inSpline, outObj, forCaps):
         curTime = doc.GetTime()
         fps = doc.GetFps()
         horOff = c4d.BaseTime(op[res_SG.SG_HOR], fps)
@@ -275,8 +276,20 @@ class SubdivideGrid(c4d.plugins.ObjectData):
             offsetStep *= offsetMult
 
         levelOff = c4d.BaseTime(offsetStep * level, fps)
-        hor = self.CompletionAtTime(driver, doc, curTime + horOff + levelOff)
-        vert = self.CompletionAtTime(driver, doc, curTime + vertOff + levelOff)
+        lookupTime = curTime
+        if forCaps:
+            cTrack = driver.FindCTrack(res_SGD.SGD_COMPLETE)
+            if cTrack is not None:
+                curve = cTrack.GetCurve()
+                if curve is not None:
+                    keyCount = curve.GetKeyCount()
+                    if keyCount != 0:
+                        firstKey = curve.GetKey(0)
+                        lastKey =  curve.GetKey(keyCount - 1)
+                        duration = lastKey.GetTime() - firstKey.GetTime()
+                        lookupTime = c4d.BaseTime(duration.Get() * 0.99)
+        hor = self.CompletionAtTime(driver, doc, lookupTime + horOff + levelOff)
+        vert = self.CompletionAtTime(driver, doc, lookupTime + vertOff + levelOff)
         size = inSpline.GetRad() * 2
 
         pointOff = 0
@@ -326,12 +339,26 @@ class SubdivideGrid(c4d.plugins.ObjectData):
         return outObj        
 
     def GetCap(self, op, doc, inObj):
+        outGeo = inObj.GetClone()
+        movedSpline = self.AnimateGrid(doc, op, inObj, outGeo, True)
         splineHelp = c4d.utils.SplineHelp()
-        splineHelp.InitSplineWith(inObj, c4d.SPLINEHELPFLAGS_GLOBALSPACE | c4d.SPLINEHELPFLAGS_CONTINUECURVE | c4d.SPLINEHELPFLAGS_RETAINLINEOBJECT)
+        splineHelp.InitSplineWith(movedSpline, c4d.SPLINEHELPFLAGS_GLOBALSPACE | c4d.SPLINEHELPFLAGS_CONTINUECURVE | c4d.SPLINEHELPFLAGS_RETAINLINEOBJECT)
         lineObj = splineHelp.GetLineObject()
         return lineObj.Triangulate(0.0)
 
-    def CheckDirty(self, op, doc):
+    def IsTopmost(self, obj):
+        obj = obj.GetUp()
+        if obj is None:
+            return True
+
+        while obj:
+            if obj.GetType() == SubdivideGrid.PLUGIN_ID:
+                return False
+            obj = obj.GetUp()
+        
+        return True
+
+    def CheckDirty(self, op, doc): # for get contour only
         frame = doc.GetTime().GetFrame(doc.GetFps())
         if self.LAST_FRAME != frame:
             self.LAST_FRAME = frame
@@ -340,9 +367,15 @@ class SubdivideGrid(c4d.plugins.ObjectData):
     def GetContour(self, op, doc, lod, bt):
         inObj = op.GetDown()
         if inObj is None: return None
+
         inSpline = self.RecursiveCollectInputs(op, doc, inObj)
+        if inSpline is None: return None
+
+        if not self.IsTopmost(op):
+            return inSpline
+
         outObj = inSpline.GetClone()
-        return self.AnimateGrid(doc, op, inSpline, outObj)
+        return self.AnimateGrid(doc, op, inSpline, outObj, False)
 
     def GetVirtualObjects(self, op, hh):
         doc = op.GetDocument()
@@ -357,6 +390,10 @@ class SubdivideGrid(c4d.plugins.ObjectData):
         inSpline = self.RecursiveCollectInputs(op, doc, inObj)
         if inSpline is None: return None
 
+        if not self.IsTopmost(op):
+            self.DRIVER = True
+            return inSpline
+
         cap = op[res_SG.SG_CAP]
         if cap:
             outGeo = self.GetCap(op, doc, inSpline)
@@ -367,7 +404,24 @@ class SubdivideGrid(c4d.plugins.ObjectData):
         else:
             outGeo = inSpline.GetClone()
 
-        return self.AnimateGrid(doc, op, inSpline, outGeo)
+        animatedGrid = self.AnimateGrid(doc, op, inSpline, outGeo, False)
+
+        if cap:
+            settings = c4d.BaseContainer()
+            settings[c4d.MDATA_OPTIMIZE_TOLERANCE] = 0.01
+            settings[c4d.MDATA_OPTIMIZE_POINTS] = False
+            settings[c4d.MDATA_OPTIMIZE_POLYGONS] = True
+            settings[c4d.MDATA_OPTIMIZE_UNUSEDPOINTS] = True
+            c4d.utils.SendModelingCommand(
+                c4d.MCOMMAND_OPTIMIZE,
+                [animatedGrid],
+                c4d.MODELINGCOMMANDMODE_ALL,
+                settings,
+                doc,
+                c4d.MODELINGCOMMANDFLAGS_NONE,
+            )
+
+        return animatedGrid
 
 class SubdivideGridExtrude(c4d.plugins.ObjectData):
     PLUGIN_ID = 1054128
