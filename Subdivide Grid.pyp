@@ -372,6 +372,7 @@ class SubdivideGrid(c4d.plugins.ObjectData):
         if inSpline is None: return None
 
         if not self.IsTopmost(op):
+            self.DRIVER = True
             return inSpline
 
         outObj = inSpline.GetClone()
@@ -412,7 +413,7 @@ class SubdivideGrid(c4d.plugins.ObjectData):
             settings[c4d.MDATA_OPTIMIZE_POINTS] = False
             settings[c4d.MDATA_OPTIMIZE_POLYGONS] = True
             settings[c4d.MDATA_OPTIMIZE_UNUSEDPOINTS] = True
-            c4d.utils.SendModelingCommand(
+            success = c4d.utils.SendModelingCommand(
                 c4d.MCOMMAND_OPTIMIZE,
                 [animatedGrid],
                 c4d.MODELINGCOMMANDMODE_ALL,
@@ -420,6 +421,7 @@ class SubdivideGrid(c4d.plugins.ObjectData):
                 doc,
                 c4d.MODELINGCOMMANDFLAGS_NONE,
             )
+            if not success: return None
 
         return animatedGrid
 
