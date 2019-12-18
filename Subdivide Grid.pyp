@@ -180,11 +180,34 @@ class SubdivideGrid(c4d.plugins.ObjectData):
         inObj[c4d.SPLINEOBJECT_CLOSED] = True
 
         while obj:
-            # if obj.GetType() == c4d.Onull:
-            #     child = obj.GetDown()
-            #     if child is not None:
-            #         childSpline = self.RecursiveCollectInputs(op, doc, child)
-            #         inObj = self.MergeSplines(inObj, childSpline)
+            info = obj.GetInfo()
+            if (info & c4d.OBJECT_GENERATOR) and not obj[c4d.ID_BASEOBJECT_GENERATOR_FLAG]:
+                obj = obj.GetNext()
+                continue
+
+            spline = GetObjectSpline(obj, doc)
+            if spline is None:
+                obj = obj.GetNext()
+                continue
+
+            inObj = self.MergeSplines(inObj, spline)
+
+            obj = obj.GetNext()
+
+        return inObj
+
+    def GetAllChildrenSplines(self, op, doc, obj):
+        inObj = c4d.SplineObject(0, c4d.SPLINETYPE_BEZIER)
+        inObj[c4d.SPLINEOBJECT_CLOSED] = True
+
+        while obj:
+            if obj.GetType() == SubdivideGrid.PLUGIN_ID:
+                child = obj.GetDown()
+                if child is not None:
+                    childSpline = self.RecursiveCollectInputs(op, doc, child)
+                    inObj = self.MergeSplines(inObj, childSpline)
+                obj = obj.GetNext()
+                continue
 
             info = obj.GetInfo()
             if (info & c4d.OBJECT_GENERATOR) and not obj[c4d.ID_BASEOBJECT_GENERATOR_FLAG]:
@@ -371,10 +394,6 @@ class SubdivideGrid(c4d.plugins.ObjectData):
         inSpline = self.RecursiveCollectInputs(op, doc, inObj)
         if inSpline is None: return None
 
-        if not self.IsTopmost(op):
-            self.DRIVER = True
-            return inSpline
-
         outObj = inSpline.GetClone()
         return self.AnimateGrid(doc, op, inSpline, outObj, False)
 
@@ -391,13 +410,10 @@ class SubdivideGrid(c4d.plugins.ObjectData):
         inSpline = self.RecursiveCollectInputs(op, doc, inObj)
         if inSpline is None: return None
 
-        if not self.IsTopmost(op):
-            self.DRIVER = True
-            return inSpline
-
         cap = op[res_SG.SG_CAP]
         if cap:
-            outGeo = self.GetCap(op, doc, inSpline)
+            capSpline = self.GetAllChildrenSplines(op, doc, inObj)
+            outGeo = self.GetCap(op, doc, capSpline)
             phong = outGeo.GetTag(c4d.Tphong)
             phong[c4d.PHONGTAG_PHONG_ANGLELIMIT] = True
             phong[c4d.PHONGTAG_PHONG_ANGLE] = c4d.utils.DegToRad(89.0)
