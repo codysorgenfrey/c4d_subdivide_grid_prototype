@@ -1,0 +1,4 @@
+STRINGTABLE Tsubdividegrid {
+    Tsubdividegrid "Subdivide Grid";
+    SG_COMPLETE "Completion";
+}

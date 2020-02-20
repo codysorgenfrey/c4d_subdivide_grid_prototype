@@ -1,6 +1,0 @@
-STRINGTABLE Tsubdividegriddriver {
-    Tsubdividegriddriver "Subdivide Grid Driver";
-    SGD_COMPLETE "Completion";
-    SGD_OFF "Recursive Offset";
-    SGD_OFF_MULT "Recursive Offset Multiplier";
-}
