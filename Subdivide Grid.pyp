@@ -42,6 +42,19 @@ class SubdivideGrid(c4d.plugins.TagData):
         return True
     
     def Execute(self, tag, doc, op, bt, priority, flags):
+        obj = tag.GetObject()
+        complete = tag[res_SG.SG_COMPLETE]
+
+        child = obj.GetDown()
+        while child:
+            posMult = c4d.utils.RangeMap(complete, 0.0, 1.0, -1.0, 0.0, False, None)
+            newScale = c4d.utils.RangeMap(complete, 0.0, 1.0, 0.0, 1.0, False, None)
+
+            child.SetFrozenScale(c4d.Vector(newScale))
+            child.SetFrozenPos(child.GetRelPos() * posMult)
+
+            child = child.GetNext()
+
         return c4d.EXECUTIONRESULT_OK
 
 
