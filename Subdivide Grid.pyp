@@ -40,20 +40,57 @@ class SubdivideGrid(c4d.plugins.TagData):
         node[res_SG.SG_COMPLETE] = 100.0
         
         return True
+
+    def maxVector(self, a, b):
+        newVec = c4d.Vector()
+        newVec.x = max(a.x, b.x)
+        newVec.y = max(a.y, b.y)
+        newVec.z = max(a.z, b.z)
+        return newVec
+
+    def minVector(self, a, b):
+        newVec = c4d.Vector()
+        newVec.x = min(a.x, b.x)
+        newVec.y = min(a.y, b.y)
+        newVec.z = min(a.z, b.z)
+        return newVec
+
+    def CaclCollectiveBoundingBox(self, splines):
+        blf = c4d.Vector(0)
+        trb = c4d.Vector(0)
+        for spline in splines:
+            rad = spline.GetRad()
+            center = spline.GetMp()
+            ml = spline.GetMl()
+            thisBlf = (center - rad) * ml
+            thisTrb = (center + rad) * ml
+            blf = self.minVector(thisBlf, blf)
+            trb = self.maxVector(thisTrb, trb)
+        
+        return {'blf': blf, 'trb': trb}
     
     def Execute(self, tag, doc, op, bt, priority, flags):
         obj = tag.GetObject()
         complete = tag[res_SG.SG_COMPLETE]
 
+        # collect splines
+        splines = []
         child = obj.GetDown()
         while child:
-            posMult = c4d.utils.RangeMap(complete, 0.0, 1.0, -1.0, 0.0, False, None)
-            newScale = c4d.utils.RangeMap(complete, 0.0, 1.0, 0.0, 1.0, False, None)
-
-            child.SetFrozenScale(c4d.Vector(newScale))
-            child.SetFrozenPos(child.GetRelPos() * posMult)
-
+            splines.append(child)
             child = child.GetNext()
+        
+        # calculate collective bounding box
+        cbbox = self.CaclCollectiveBoundingBox(splines)
+
+        # while child:
+        #     posMult = c4d.utils.RangeMap(complete, 0.0, 1.0, -1.0, 0.0, False, None)
+        #     newScale = c4d.utils.RangeMap(complete, 0.0, 1.0, 0.0, 1.0, False, None)
+
+        #     child.SetFrozenScale(c4d.Vector(newScale))
+        #     child.SetFrozenPos(child.GetRelPos() * posMult)
+
+        #     child = child.GetNext()
 
         return c4d.EXECUTIONRESULT_OK
 
