@@ -1,4 +1,8 @@
 STRINGTABLE Tsubdividegrid {
     Tsubdividegrid "Subdivide Grid";
     SG_COMPLETE "Completion";
+    SG_SPLINE_GROUP "Splines";
+    SG_SPLINE_X "X Spline";
+    SG_SPLINE_Y "Y Spline";
+    SG_SPLINE_Z "Z Spline";
 }

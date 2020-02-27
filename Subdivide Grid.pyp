@@ -11,10 +11,27 @@ def load_bitmap(path):
     return bmp
 
 def isclose(a, b, rel_tol=1e-09, abs_tol=0.0):
-    return abs(a-b) <= max(rel_tol * max(abs(a), abs(b)), abs_tol)
+    if rel_tol < 0 or abs_tol < 0:
+        raise ValueError("tolerances must be non-negative")
+
+    if a == b:
+        return True
+
+    if math.isinf(a) or math.isinf(b):
+        return False
+
+    diff = math.fabs(b - a)
+    result = (((diff <= math.fabs(rel_tol * b)) or
+               (diff <= math.fabs(rel_tol * a))) or
+              (diff <= abs_tol))
+    return result
 
 class res_SG(object):
     SG_COMPLETE = 1000
+    SG_SPLINE_GROUP = 1001
+    SG_SPLINE_X = 1002
+    SG_SPLINE_Y = 1003
+    SG_SPLINE_Z = 1004
 res_SG = res_SG()
 
 class SubdivideGrid(c4d.plugins.TagData):
@@ -44,6 +61,26 @@ class SubdivideGrid(c4d.plugins.TagData):
         
         return True
 
+    def GetDDescription(self, node, description, flags):
+        # Before adding dynamic parameters, load the parameters from the description resource
+        if not description.LoadDescription(node.GetType()): return False
+
+        # Get description single ID
+        singleID = description.GetSingleDescID()
+
+        # Check if dynamic parameter with ID paramID has to be added
+        paramID = c4d.DescID(c4d.DescLevel(res_SG.SG_SPLINE_X, c4d.CUSTOMDATATYPE_SPLINE))
+        if singleID is None or paramID.IsPartOf(singleID)[0]:
+            # Add spline control
+            bc = c4d.GetCustomDataTypeDefault(c4d.CUSTOMDATATYPE_SPLINE)
+            print bc
+            if not description.SetParameter(paramID, bc, c4d.DESCID_ROOT):
+                print 'fail'
+                return False
+
+        # After parameters have been loaded and added successfully, return True and DESCFLAGS_DESC_LOADED with the input flags
+        return (True, flags | c4d.DESCFLAGS_DESC_LOADED)
+
     def maxVector(self, a, b):
         newVec = c4d.Vector()
         newVec.x = max(a.x, b.x)
@@ -59,8 +96,8 @@ class SubdivideGrid(c4d.plugins.TagData):
         return newVec
 
     def GetObjectBBox(self, obj):
-        rad = obj.GetRad() * obj.GetAbsScale()
-        center = obj.GetAbsPos() + obj.GetMp()
+        rad = obj.GetRad()
+        center = (obj.GetRelPos() * obj.GetUpMg()) + obj.GetMp()
         thisBlf = center - rad
         thisTrb = center + rad
         return { 'blf': thisBlf, 'trb': thisTrb }
@@ -69,73 +106,63 @@ class SubdivideGrid(c4d.plugins.TagData):
         initBbox = self.GetObjectBBox(splines[0])
         blf = initBbox['blf']
         trb = initBbox['trb']
-        for spline in splines:
-            bbox = self.GetObjectBBox(spline)
+        for x in range(1, len(splines)):
+            bbox = self.GetObjectBBox(splines[x])
             blf = self.minVector(bbox['blf'], blf)
             trb = self.maxVector(bbox['trb'], trb)
-        
         return { 'blf': blf, 'trb': trb }
 
-    def GetAbsRad(self, obj):
-        bbox = self.GetObjectBBox(obj)
-        return (bbox['trb'] - bbox['blf']) * 0.5
-
-    def MakesFarSides(self, spline, corner):
-        x = False
-        y = False
-        z = False
-        if spline.GetName() == 'Rectangle':
-            x = True
-            y = True
-            z = True
-        if spline.GetName() == 'Rectangle.3':
-            x = True
-            y = False
-            z = True
-        if spline.GetName() == 'Rectangle.4':
-            x = False
-            y = True
-            z = True
-        return { 'x': x, 'y': y, 'z': z }
-    
-    def Execute(self, tag, doc, op, bt, priority, flags):
-        obj = tag.GetObject()
-        complete = tag[res_SG.SG_COMPLETE]
-
-        # collect splines
-        # if nothing in list, get children
-        splines = obj.GetChildren()
-
-        if splines is None: return c4d.EXECUTIONRESULT_OK
-        
-        # calculate collective bounding box
-        cbbox = self.GetCollectiveBBox(splines)
-        parentRad = obj.GetRad()
-        parentMg = obj.GetMg()
-        parentAnchor = parentMg.off
-        parentObjSpaceAnchor = (-obj.GetMp()) + parentRad
-        
-        # calculate corners
+    def GetCornersFromBBox(self, bbox):
         corners = [None] * 8
-        corners[0] = cbbox['blf']
-        corners[1] = cbbox['trb']
+        corners[0] = bbox['blf']
+        corners[1] = bbox['trb']
         corners[2] = c4d.Vector(corners[0].x, corners[0].y, corners[1].z)
         corners[3] = c4d.Vector(corners[0].x, corners[1].y, corners[0].z)
         corners[4] = c4d.Vector(corners[1].x, corners[0].y, corners[0].z)
         corners[5] = c4d.Vector(corners[1].x, corners[1].y, corners[0].z)
         corners[6] = c4d.Vector(corners[1].x, corners[0].y, corners[1].z)
         corners[7] = c4d.Vector(corners[0].x, corners[1].y, corners[1].z)
+        return corners
+
+    def MakesFarSides(self, spline, farCorner):
+        x = False
+        y = False
+        z = False
+        corners = self.GetCornersFromBBox(self.GetObjectBBox(spline))
+        for corner in corners:
+            if isclose(corner.x, farCorner.x): x = True
+            if isclose(corner.y, farCorner.y): y = True
+            if isclose(corner.z, farCorner.z): z = True
+        return { 'x': x, 'y': y, 'z': z }
+    
+    def Execute(self, tag, doc, op, bt, priority, flags):
+        parent = tag.GetObject()
+        complete = tag[res_SG.SG_COMPLETE]
+
+        # collect splines
+        # if nothing in list, get children
+        splines = parent.GetChildren()
+
+        if splines is None: return c4d.EXECUTIONRESULT_OK
+        
+        # gather parent info so not to recalculate later
+        parentRad = parent.GetRad()
+        parentMg = parent.GetMg()
+        parentAnchor = parentMg.off
+        parentObjSpaceAnchor = (-parent.GetMp()) + parentRad
+        
+        parentCorners = self.GetCornersFromBBox(self.GetCollectiveBBox(splines))
         def DistFromAnchor(obj, anchor=parentAnchor):
             return (anchor - obj).GetLength()
-        corners.sort(key=DistFromAnchor)
-        farthestCorner = corners[7]
+        parentCorners.sort(key=DistFromAnchor)
+        parentFarCorner = parentCorners[7]
 
         # calculate movements
         for spline in splines:
             if not spline[c4d.ID_BASEOBJECT_GENERATOR_FLAG]: continue
 
             splineRad = spline.GetRad()
-            makesFarSides = self.MakesFarSides(spline, farthestCorner)
+            makesFarSides = self.MakesFarSides(spline, parentFarCorner)
 
             # scale
             maxScaleOff = c4d.Vector(0.0001) # cannot be 0 or else connect object freaks out
@@ -149,7 +176,7 @@ class SubdivideGrid(c4d.plugins.TagData):
                 if splineRad.z != 0: 
                     maxScaleOff.z = parentRad.z / splineRad.z
 
-            scaleOff = c4d.Vector(1)
+            scaleOff = c4d.Vector(1.0)
             scaleOff.x = c4d.utils.RangeMap(complete, 1.0, 0.0, 1.0, maxScaleOff.x, False, None)
             scaleOff.y = c4d.utils.RangeMap(complete, 1.0, 0.0, 1.0, maxScaleOff.y, False, None)
             scaleOff.z = c4d.utils.RangeMap(complete, 1.0, 0.0, 1.0, maxScaleOff.z, False, None)
