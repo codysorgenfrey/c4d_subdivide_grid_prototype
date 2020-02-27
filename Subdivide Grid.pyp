@@ -32,6 +32,7 @@ class res_SG(object):
     SG_SPLINE_X = 1002
     SG_SPLINE_Y = 1003
     SG_SPLINE_Z = 1004
+    SG_BASIC_GROUP = 1005
 res_SG = res_SG()
 
 class SubdivideGrid(c4d.plugins.TagData):
@@ -54,13 +55,6 @@ class SubdivideGrid(c4d.plugins.TagData):
             cls.PLUGIN_DISKLEVEL,
         )
 
-    def Init(self, node):
-        self.InitAttr(node, float, res_SG.SG_COMPLETE)
-
-        node[res_SG.SG_COMPLETE] = 100.0
-        
-        return True
-
     def GetDDescription(self, node, description, flags):
         # Before adding dynamic parameters, load the parameters from the description resource
         if not description.LoadDescription(node.GetType()): return False
@@ -68,18 +62,101 @@ class SubdivideGrid(c4d.plugins.TagData):
         # Get description single ID
         singleID = description.GetSingleDescID()
 
-        # Check if dynamic parameter with ID paramID has to be added
-        paramID = c4d.DescID(c4d.DescLevel(res_SG.SG_SPLINE_X, c4d.CUSTOMDATATYPE_SPLINE))
-        if singleID is None or paramID.IsPartOf(singleID)[0]:
-            # Add spline control
+        # Add basic group
+        basicGroupID = c4d.DescID(c4d.DescLevel(res_SG.SG_BASIC_GROUP, c4d.DTYPE_GROUP))
+        if singleID is None or basicGroupID.IsPartOf(singleID)[0]:
+            bc = c4d.GetCustomDataTypeDefault(c4d.DTYPE_GROUP)
+            bc.SetString(c4d.DESC_NAME, 'Basic')
+            bc.SetString(c4d.DESC_SHORT_NAME, 'Basic')
+            bc.SetBool(c4d.DESC_GUIOPEN, True)
+            if not description.SetParameter(basicGroupID, bc, c4d.ID_TAGPROPERTIES):
+                return False
+
+        # Add Complete control
+        completeID = c4d.DescID(c4d.DescLevel(res_SG.SG_COMPLETE, c4d.DTYPE_REAL))
+        if singleID is None or completeID.IsPartOf(singleID)[0]:
+            bc = c4d.GetCustomDataTypeDefault(c4d.DTYPE_REAL)
+            bc.SetString(c4d.DESC_NAME, 'Complete')
+            bc.SetString(c4d.DESC_SHORT_NAME, 'Complete')
+            bc.SetInt32(c4d.DESC_UNIT, c4d.DESC_UNIT_PERCENT)
+            bc.SetInt32(c4d.DESC_CUSTOMGUI, c4d.CUSTOMGUI_REALSLIDER)
+            bc.SetFloat(c4d.DESC_DEFAULT, 1.0)
+            bc.SetFloat(c4d.DESC_MIN, 0.0)
+            bc.SetFloat(c4d.DESC_MAX, 1.0)
+            bc.SetFloat(c4d.DESC_MINSLIDER, 0.0)
+            bc.SetFloat(c4d.DESC_MAXSLIDER, 1.0)
+            bc.SetFloat(c4d.DESC_STEP, 0.01)
+            bc.SetBool(c4d.DESC_GUIOPEN, True)
+            if not description.SetParameter(completeID, bc, basicGroupID):
+                return False
+
+        # Add spline group
+        splineGroupID = c4d.DescID(c4d.DescLevel(res_SG.SG_SPLINE_GROUP, c4d.DTYPE_GROUP))
+        if singleID is None or splineGroupID.IsPartOf(singleID)[0]:
+            bc = c4d.GetCustomDataTypeDefault(c4d.DTYPE_GROUP)
+            bc.SetString(c4d.DESC_NAME, 'Time Ramps')
+            bc.SetString(c4d.DESC_SHORT_NAME, 'Time Ramps')
+            bc.SetBool(c4d.DESC_GUIOPEN, False)
+            if not description.SetParameter(splineGroupID, bc, c4d.ID_TAGPROPERTIES):
+                return False
+        
+        # Add x ramp control
+        splineXID = c4d.DescID(c4d.DescLevel(res_SG.SG_SPLINE_X, c4d.CUSTOMDATATYPE_SPLINE))
+        if singleID is None or splineXID.IsPartOf(singleID)[0]:
             bc = c4d.GetCustomDataTypeDefault(c4d.CUSTOMDATATYPE_SPLINE)
-            print bc
-            if not description.SetParameter(paramID, bc, c4d.DESCID_ROOT):
-                print 'fail'
+            bc.SetString(c4d.DESC_NAME, 'X Ramp')
+            bc.SetString(c4d.DESC_SHORT_NAME, 'X Ramp')
+            bc.SetBool(c4d.DESC_GUIOPEN, False)
+            bc.SetFloat(c4d.SPLINECONTROL_X_MIN, 0.0)
+            bc.SetFloat(c4d.SPLINECONTROL_X_MAX, 1.0)
+            bc.SetFloat(c4d.SPLINECONTROL_Y_MIN, 0.0)
+            bc.SetFloat(c4d.SPLINECONTROL_Y_MAX, 1.0)
+            if not description.SetParameter(splineXID, bc, splineGroupID):
+                return False
+        
+        # Add y ramp control
+        splineYID = c4d.DescID(c4d.DescLevel(res_SG.SG_SPLINE_Y, c4d.CUSTOMDATATYPE_SPLINE))
+        if singleID is None or splineYID.IsPartOf(singleID)[0]:
+            bc = c4d.GetCustomDataTypeDefault(c4d.CUSTOMDATATYPE_SPLINE)
+            bc.SetString(c4d.DESC_NAME, 'Y Ramp')
+            bc.SetString(c4d.DESC_SHORT_NAME, 'Y Ramp')
+            bc.SetBool(c4d.DESC_GUIOPEN, False)
+            bc.SetFloat(c4d.SPLINECONTROL_X_MIN, 0.0)
+            bc.SetFloat(c4d.SPLINECONTROL_X_MAX, 1.0)
+            bc.SetFloat(c4d.SPLINECONTROL_Y_MIN, 0.0)
+            bc.SetFloat(c4d.SPLINECONTROL_Y_MAX, 1.0)
+            if not description.SetParameter(splineYID, bc, splineGroupID):
+                return False
+
+        # Add z ramp control
+        splineZID = c4d.DescID(c4d.DescLevel(res_SG.SG_SPLINE_Z, c4d.CUSTOMDATATYPE_SPLINE))
+        if singleID is None or splineZID.IsPartOf(singleID)[0]:
+            bc = c4d.GetCustomDataTypeDefault(c4d.CUSTOMDATATYPE_SPLINE)
+            bc.SetString(c4d.DESC_NAME, 'Z Ramp')
+            bc.SetString(c4d.DESC_SHORT_NAME, 'Z Ramp')
+            bc.SetBool(c4d.DESC_GUIOPEN, False)
+            bc.SetFloat(c4d.SPLINECONTROL_X_MIN, 0.0)
+            bc.SetFloat(c4d.SPLINECONTROL_X_MAX, 1.0)
+            bc.SetFloat(c4d.SPLINECONTROL_Y_MIN, 0.0)
+            bc.SetFloat(c4d.SPLINECONTROL_Y_MAX, 1.0)
+            if not description.SetParameter(splineZID, bc, splineGroupID):
                 return False
 
         # After parameters have been loaded and added successfully, return True and DESCFLAGS_DESC_LOADED with the input flags
         return (True, flags | c4d.DESCFLAGS_DESC_LOADED)
+
+    def Init(self, node):
+        self.InitAttr(node, float, res_SG.SG_COMPLETE)
+
+        node[res_SG.SG_COMPLETE] = 100.0
+        sd = c4d.SplineData()
+        sd.SetKnot(0, c4d.Vector(0))
+        sd.SetKnot(1, c4d.Vector(1))
+        node[res_SG.SG_SPLINE_X] = sd
+        node[res_SG.SG_SPLINE_Y] = sd
+        node[res_SG.SG_SPLINE_Z] = sd
+        
+        return True
 
     def maxVector(self, a, b):
         newVec = c4d.Vector()
