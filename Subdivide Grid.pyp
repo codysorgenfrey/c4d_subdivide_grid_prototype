@@ -59,9 +59,8 @@ class SubdivideGrid(c4d.plugins.TagData):
         return newVec
 
     def GetObjectBBox(self, obj):
-        rad = obj.GetRad()
-        center = obj.GetMg().off + obj.GetMp()
-        mg = obj.GetMg()
+        rad = obj.GetRad() * obj.GetAbsScale()
+        center = obj.GetAbsPos() + obj.GetMp()
         thisBlf = center - rad
         thisTrb = center + rad
         return { 'blf': thisBlf, 'trb': thisTrb }
@@ -77,36 +76,27 @@ class SubdivideGrid(c4d.plugins.TagData):
         
         return { 'blf': blf, 'trb': trb }
 
-    def MakesCloseSides(self, spline, corner):
-        x = False
-        y = False
-        z = False
-        return { 'x': x, 'y': y, 'z': z }
+    def GetAbsRad(self, obj):
+        bbox = self.GetObjectBBox(obj)
+        return (bbox['trb'] - bbox['blf']) * 0.5
 
     def MakesFarSides(self, spline, corner):
         x = False
         y = False
         z = False
-        if spline.GetName() == 'Rectangle.2':
+        if spline.GetName() == 'Rectangle':
             x = True
             y = True
             z = True
+        if spline.GetName() == 'Rectangle.3':
+            x = True
+            y = False
+            z = True
+        if spline.GetName() == 'Rectangle.4':
+            x = False
+            y = True
+            z = True
         return { 'x': x, 'y': y, 'z': z }
-
-    def GetRelPosInGlobalSpace(self, obj):
-        pos = obj.GetRelPos()
-        parent = obj.GetUp()
-        if parent:
-            pos = pos * parent.GetMg()
-
-        return pos
-
-    def RadFromBBox(self, bbox):
-        rad = (bbox['blf'] - bbox['trb']) * 0.5
-        rad.x = abs(rad.x)
-        rad.y = abs(rad.y)
-        rad.z = abs(rad.z)
-        return rad
     
     def Execute(self, tag, doc, op, bt, priority, flags):
         obj = tag.GetObject()
@@ -120,8 +110,10 @@ class SubdivideGrid(c4d.plugins.TagData):
         
         # calculate collective bounding box
         cbbox = self.GetCollectiveBBox(splines)
-        parentRad = self.RadFromBBox(cbbox)
-        anchor = obj.GetAbsPos()
+        parentRad = obj.GetRad()
+        parentMg = obj.GetMg()
+        parentAnchor = parentMg.off
+        parentObjSpaceAnchor = (-obj.GetMp()) + parentRad
         
         # calculate corners
         corners = [None] * 8
@@ -133,11 +125,9 @@ class SubdivideGrid(c4d.plugins.TagData):
         corners[5] = c4d.Vector(corners[1].x, corners[1].y, corners[0].z)
         corners[6] = c4d.Vector(corners[1].x, corners[0].y, corners[1].z)
         corners[7] = c4d.Vector(corners[0].x, corners[1].y, corners[1].z)
-        def DistFromAnchor(obj, anchor=anchor):
+        def DistFromAnchor(obj, anchor=parentAnchor):
             return (anchor - obj).GetLength()
         corners.sort(key=DistFromAnchor)
-        # farthest and closest corners
-        closestCorner = corners[0]
         farthestCorner = corners[7]
 
         # calculate movements
@@ -145,17 +135,19 @@ class SubdivideGrid(c4d.plugins.TagData):
             if not spline[c4d.ID_BASEOBJECT_GENERATOR_FLAG]: continue
 
             splineRad = spline.GetRad()
-            makesCloseSides = self.MakesCloseSides(spline, closestCorner)
             makesFarSides = self.MakesFarSides(spline, farthestCorner)
 
             # scale
             maxScaleOff = c4d.Vector(0.0001) # cannot be 0 or else connect object freaks out
             if makesFarSides['x']:
-                if splineRad.x != 0: maxScaleOff.x = parentRad.x / splineRad.x
+                if splineRad.x != 0: 
+                    maxScaleOff.x = 2
             if makesFarSides['y']:
-                if splineRad.y != 0: maxScaleOff.y = parentRad.y / splineRad.y
+                if splineRad.y != 0: 
+                    maxScaleOff.y = 2
             if makesFarSides['z']:
-                if splineRad.z != 0: maxScaleOff.z = parentRad.z / splineRad.z
+                if splineRad.z != 0: 
+                    maxScaleOff.z = 2
 
             scaleOff = c4d.Vector(1)
             scaleOff.x = c4d.utils.RangeMap(complete, 1.0, 0.0, 1.0, maxScaleOff.x, False, None)
@@ -163,10 +155,27 @@ class SubdivideGrid(c4d.plugins.TagData):
             scaleOff.z = c4d.utils.RangeMap(complete, 1.0, 0.0, 1.0, maxScaleOff.z, False, None)
 
             # position
-            maxPosOff = anchor - self.GetRelPosInGlobalSpace(spline)
-            # if makesFarSides['x']: maxPosOff.x = (0.5 * maxPosOff.x) + (0.5 * splineRad.x)
-            # if makesFarSides['y']: maxPosOff.y = (0.5 * maxPosOff.y) - (0.5 * splineRad.y)
-            # if makesFarSides['z']: maxPosOff.z = (0.5 * maxPosOff.z) + (0.5 * splineRad.z)
+            splineRelPos = spline.GetRelPos()
+            maxPosOff = -splineRelPos
+            splineObjSpaceAnchor = (-spline.GetMp()) + splineRad
+            if makesFarSides['x']:
+                if splineRad.x != 0:
+                    origPosX = splineRelPos.x
+                    newSplineObjSpaceAnchorX = (splineObjSpaceAnchor.x / splineRad.x) * parentRad.x
+                    newPosX = newSplineObjSpaceAnchorX - parentObjSpaceAnchor.x
+                    maxPosOff.x = newPosX - origPosX
+            if makesFarSides['y']:
+                if splineRad.y != 0:
+                    origPosY = splineRelPos.y
+                    newSplineObjSpaceAnchorY = (splineObjSpaceAnchor.y / splineRad.y) * parentRad.y
+                    newPosY = newSplineObjSpaceAnchorY - parentObjSpaceAnchor.y
+                    maxPosOff.y = newPosY - origPosY
+            if makesFarSides['z']:
+                if splineRad.z != 0:
+                    origPosZ = splineRelPos.z
+                    newSplineObjSpaceAnchorZ = (splineObjSpaceAnchor.z / splineRad.z) * parentRad.z
+                    newPosZ = newSplineObjSpaceAnchorZ - parentObjSpaceAnchor.z
+                    maxPosOff.z = newPosZ - origPosZ
 
             posOff = c4d.Vector(0)
             posOff.x = c4d.utils.RangeMap(complete, 1.0, 0.0, 0.0, maxPosOff.x, False, None)
