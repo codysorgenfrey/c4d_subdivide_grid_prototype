@@ -141,13 +141,13 @@ class SubdivideGrid(c4d.plugins.TagData):
             maxScaleOff = c4d.Vector(0.0001) # cannot be 0 or else connect object freaks out
             if makesFarSides['x']:
                 if splineRad.x != 0: 
-                    maxScaleOff.x = 2
+                    maxScaleOff.x = parentRad.x / splineRad.x
             if makesFarSides['y']:
                 if splineRad.y != 0: 
-                    maxScaleOff.y = 2
+                    maxScaleOff.y = parentRad.y / splineRad.y
             if makesFarSides['z']:
                 if splineRad.z != 0: 
-                    maxScaleOff.z = 2
+                    maxScaleOff.z = parentRad.z / splineRad.z
 
             scaleOff = c4d.Vector(1)
             scaleOff.x = c4d.utils.RangeMap(complete, 1.0, 0.0, 1.0, maxScaleOff.x, False, None)
