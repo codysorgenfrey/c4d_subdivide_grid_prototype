@@ -32,7 +32,6 @@ class res_SG(object):
     SG_SPLINE_X = 1002
     SG_SPLINE_Y = 1003
     SG_SPLINE_Z = 1004
-    SG_BASIC_GROUP = 1005
 res_SG = res_SG()
 
 class SubdivideGrid(c4d.plugins.TagData):
@@ -62,16 +61,6 @@ class SubdivideGrid(c4d.plugins.TagData):
         # Get description single ID
         singleID = description.GetSingleDescID()
 
-        # Add basic group
-        basicGroupID = c4d.DescID(c4d.DescLevel(res_SG.SG_BASIC_GROUP, c4d.DTYPE_GROUP))
-        if singleID is None or basicGroupID.IsPartOf(singleID)[0]:
-            bc = c4d.GetCustomDataTypeDefault(c4d.DTYPE_GROUP)
-            bc.SetString(c4d.DESC_NAME, 'Basic')
-            bc.SetString(c4d.DESC_SHORT_NAME, 'Basic')
-            bc.SetBool(c4d.DESC_GUIOPEN, True)
-            if not description.SetParameter(basicGroupID, bc, c4d.ID_TAGPROPERTIES):
-                return False
-
         # Add Complete control
         completeID = c4d.DescID(c4d.DescLevel(res_SG.SG_COMPLETE, c4d.DTYPE_REAL))
         if singleID is None or completeID.IsPartOf(singleID)[0]:
@@ -87,7 +76,7 @@ class SubdivideGrid(c4d.plugins.TagData):
             bc.SetFloat(c4d.DESC_MAXSLIDER, 1.0)
             bc.SetFloat(c4d.DESC_STEP, 0.01)
             bc.SetBool(c4d.DESC_GUIOPEN, True)
-            if not description.SetParameter(completeID, bc, basicGroupID):
+            if not description.SetParameter(completeID, bc, c4d.ID_TAGPROPERTIES):
                 return False
 
         # Add spline group
@@ -97,7 +86,7 @@ class SubdivideGrid(c4d.plugins.TagData):
             bc.SetString(c4d.DESC_NAME, 'Time Ramps')
             bc.SetString(c4d.DESC_SHORT_NAME, 'Time Ramps')
             bc.SetBool(c4d.DESC_GUIOPEN, False)
-            if not description.SetParameter(splineGroupID, bc, c4d.ID_TAGPROPERTIES):
+            if not description.SetParameter(splineGroupID, bc, c4d.DESCID_ROOT):
                 return False
         
         # Add x ramp control
@@ -150,8 +139,29 @@ class SubdivideGrid(c4d.plugins.TagData):
 
         node[res_SG.SG_COMPLETE] = 100.0
         sd = c4d.SplineData()
-        sd.SetKnot(0, c4d.Vector(0))
-        sd.SetKnot(1, c4d.Vector(1))
+        knots = sd.GetKnots()
+        knots[0]['vPos'] = c4d.Vector(0)
+        knots[0]['vTangentRight'] = c4d.Vector(0.25)
+        knots[1]['vPos'] = c4d.Vector(1)
+        knots[1]['vTangentLeft'] = c4d.Vector(-0.25)
+        sd.SetKnot(
+            0,
+            knots[0]['vPos'],
+            knots[0]['lFlagsSettings'],
+            knots[0]['bSelect'],
+            knots[0]['vTangentLeft'],
+            knots[0]['vTangentRight'],
+            knots[0]['interpol']
+        )
+        sd.SetKnot(
+            1,
+            knots[1]['vPos'],
+            knots[1]['lFlagsSettings'],
+            knots[1]['bSelect'],
+            knots[1]['vTangentLeft'],
+            knots[1]['vTangentRight'],
+            knots[1]['interpol']
+        )
         node[res_SG.SG_SPLINE_X] = sd
         node[res_SG.SG_SPLINE_Y] = sd
         node[res_SG.SG_SPLINE_Z] = sd
@@ -215,6 +225,9 @@ class SubdivideGrid(c4d.plugins.TagData):
     def Execute(self, tag, doc, op, bt, priority, flags):
         parent = tag.GetObject()
         complete = tag[res_SG.SG_COMPLETE]
+        xSpline = tag[res_SG.SG_SPLINE_X]
+        ySpline = tag[res_SG.SG_SPLINE_Y]
+        zSpline = tag[res_SG.SG_SPLINE_Z]
 
         # collect splines
         # if nothing in list, get children
@@ -254,9 +267,9 @@ class SubdivideGrid(c4d.plugins.TagData):
                     maxScaleOff.z = parentRad.z / splineRad.z
 
             scaleOff = c4d.Vector(1.0)
-            scaleOff.x = c4d.utils.RangeMap(complete, 1.0, 0.0, 1.0, maxScaleOff.x, False, None)
-            scaleOff.y = c4d.utils.RangeMap(complete, 1.0, 0.0, 1.0, maxScaleOff.y, False, None)
-            scaleOff.z = c4d.utils.RangeMap(complete, 1.0, 0.0, 1.0, maxScaleOff.z, False, None)
+            scaleOff.x = c4d.utils.RangeMap(complete, 1.0, 0.0, 1.0, maxScaleOff.x, False, xSpline)
+            scaleOff.y = c4d.utils.RangeMap(complete, 1.0, 0.0, 1.0, maxScaleOff.y, False, ySpline)
+            scaleOff.z = c4d.utils.RangeMap(complete, 1.0, 0.0, 1.0, maxScaleOff.z, False, zSpline)
 
             # position
             splineRelPos = spline.GetRelPos()
@@ -282,9 +295,9 @@ class SubdivideGrid(c4d.plugins.TagData):
                     maxPosOff.z = newPosZ - origPosZ
 
             posOff = c4d.Vector(0)
-            posOff.x = c4d.utils.RangeMap(complete, 1.0, 0.0, 0.0, maxPosOff.x, False, None)
-            posOff.y = c4d.utils.RangeMap(complete, 1.0, 0.0, 0.0, maxPosOff.y, False, None)
-            posOff.z = c4d.utils.RangeMap(complete, 1.0, 0.0, 0.0, maxPosOff.z, False, None)
+            posOff.x = c4d.utils.RangeMap(complete, 1.0, 0.0, 0.0, maxPosOff.x, False, xSpline)
+            posOff.y = c4d.utils.RangeMap(complete, 1.0, 0.0, 0.0, maxPosOff.y, False, ySpline)
+            posOff.z = c4d.utils.RangeMap(complete, 1.0, 0.0, 0.0, maxPosOff.z, False, zSpline)
 
             # apply
             spline.SetFrozenPos(posOff)
