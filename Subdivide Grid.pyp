@@ -26,12 +26,21 @@ def isclose(a, b, rel_tol=1e-09, abs_tol=0.0):
               (diff <= abs_tol))
     return result
 
+def roundOffVector(inVec):
+    outVec = c4d.Vector()
+    per = 10000
+    outVec.x = math.floor(inVec.x * per + 0.5) / per
+    outVec.y = math.floor(inVec.y * per + 0.5) / per
+    outVec.z = math.floor(inVec.z * per + 0.5) / per
+    return outVec
+
 class res_SG(object):
     SG_COMPLETE = 1000
     SG_SPLINE_GROUP = 1001
     SG_SPLINE_X = 1002
     SG_SPLINE_Y = 1003
     SG_SPLINE_Z = 1004
+    SG_LIST = 1005
 res_SG = res_SG()
 
 class SubdivideGrid(c4d.plugins.TagData):
@@ -77,6 +86,16 @@ class SubdivideGrid(c4d.plugins.TagData):
             bc.SetFloat(c4d.DESC_STEP, 0.01)
             bc.SetBool(c4d.DESC_GUIOPEN, True)
             if not description.SetParameter(completeID, bc, c4d.ID_TAGPROPERTIES):
+                return False
+
+        # Add list control
+        listID = c4d.DescID(c4d.DescLevel(res_SG.SG_LIST, c4d.CUSTOMDATATYPE_INEXCLUDE_LIST))
+        if singleID is None or listID.IsPartOf(singleID)[0]:
+            bc = c4d.GetCustomDataTypeDefault(c4d.CUSTOMDATATYPE_INEXCLUDE_LIST)
+            bc.SetString(c4d.DESC_NAME, 'Splines')
+            bc.SetString(c4d.DESC_SHORT_NAME, 'Splines')
+            bc.SetBool(c4d.DESC_GUIOPEN, True)
+            if not description.SetParameter(listID, bc, c4d.ID_TAGPROPERTIES):
                 return False
 
         # Add spline group
@@ -138,6 +157,9 @@ class SubdivideGrid(c4d.plugins.TagData):
         self.InitAttr(node, float, res_SG.SG_COMPLETE)
 
         node[res_SG.SG_COMPLETE] = 100.0
+
+        node[res_SG.SG_LIST] = c4d.InExcludeData()
+
         sd = c4d.SplineData()
         knots = sd.GetKnots()
         knots[0]['vPos'] = c4d.Vector(0)
@@ -184,9 +206,12 @@ class SubdivideGrid(c4d.plugins.TagData):
 
     def GetObjectBBox(self, obj):
         rad = obj.GetRad()
-        center = (obj.GetRelPos() * obj.GetUpMg()) + obj.GetMp()
-        thisBlf = center - rad
-        thisTrb = center + rad
+        if isclose(rad.GetLength(), 0.0) and obj.GetDown():
+            children = obj.GetChildren()
+            return self.GetCollectiveBBox(children)
+        center = (obj.GetUpMg() * obj.GetRelPos()) + obj.GetMp()
+        thisBlf = roundOffVector(center - rad)
+        thisTrb = roundOffVector(center + rad)
         return { 'blf': thisBlf, 'trb': thisTrb }
 
     def GetCollectiveBBox(self, splines):
@@ -198,6 +223,13 @@ class SubdivideGrid(c4d.plugins.TagData):
             blf = self.minVector(bbox['blf'], blf)
             trb = self.maxVector(bbox['trb'], trb)
         return { 'blf': blf, 'trb': trb }
+
+    def GetRadFromBBox(self, bbox):
+        rad = c4d.Vector()
+        rad.x = abs(bbox['trb'].x - bbox['blf'].x) / 2
+        rad.y = abs(bbox['trb'].y - bbox['blf'].y) / 2
+        rad.z = abs(bbox['trb'].z - bbox['blf'].z) / 2
+        return rad
 
     def GetCornersFromBBox(self, bbox):
         corners = [None] * 8
@@ -211,11 +243,11 @@ class SubdivideGrid(c4d.plugins.TagData):
         corners[7] = c4d.Vector(corners[0].x, corners[1].y, corners[1].z)
         return corners
 
-    def MakesFarSides(self, spline, farCorner):
+    def MakesFarSides(self, splineBBox, farCorner):
         x = False
         y = False
         z = False
-        corners = self.GetCornersFromBBox(self.GetObjectBBox(spline))
+        corners = self.GetCornersFromBBox(splineBBox)
         for corner in corners:
             if isclose(corner.x, farCorner.x): x = True
             if isclose(corner.y, farCorner.y): y = True
@@ -225,79 +257,79 @@ class SubdivideGrid(c4d.plugins.TagData):
     def Execute(self, tag, doc, op, bt, priority, flags):
         parent = tag.GetObject()
         complete = tag[res_SG.SG_COMPLETE]
+        splineList = tag[res_SG.SG_LIST]
         xSpline = tag[res_SG.SG_SPLINE_X]
         ySpline = tag[res_SG.SG_SPLINE_Y]
         zSpline = tag[res_SG.SG_SPLINE_Z]
 
         # collect splines
+        splines = []
+        for x in range(splineList.GetObjectCount()):
+            splines.append(splineList.ObjectFromIndex(doc, x))
         # if nothing in list, get children
-        splines = parent.GetChildren()
+        if len(splines) == 0:
+            splines = parent.GetChildren()
 
-        if splines is None: return c4d.EXECUTIONRESULT_OK
+        if len(splines) == 0: return c4d.EXECUTIONRESULT_OK
         
         # gather parent info so not to recalculate later
-        parentRad = parent.GetRad()
         parentMg = parent.GetMg()
         parentAnchor = parentMg.off
-        parentObjSpaceAnchor = (-parent.GetMp()) + parentRad
-        
-        parentCorners = self.GetCornersFromBBox(self.GetCollectiveBBox(splines))
+        parentBBox = self.GetCollectiveBBox(splines)
+        parentCorners = self.GetCornersFromBBox(parentBBox)
         def DistFromAnchor(obj, anchor=parentAnchor):
             return (anchor - obj).GetLength()
         parentCorners.sort(key=DistFromAnchor)
         parentFarCorner = parentCorners[7]
+        parentRad = self.GetRadFromBBox(parentBBox)
+        parentObjSpaceAnchor = parentAnchor - parentBBox['blf']
 
         # calculate movements
         for spline in splines:
-            if not spline[c4d.ID_BASEOBJECT_GENERATOR_FLAG]: continue
+            if not spline.GetDeformMode(): continue # spline is disabled
 
-            splineRad = spline.GetRad()
-            makesFarSides = self.MakesFarSides(spline, parentFarCorner)
+            splineBBox = self.GetObjectBBox(spline)
+            splineRad = self.GetRadFromBBox(splineBBox)
+            makesFarSides = self.MakesFarSides(splineBBox, parentFarCorner)
 
             # scale
-            maxScaleOff = c4d.Vector(0.0001) # cannot be 0 or else connect object freaks out
-            if makesFarSides['x']:
-                if splineRad.x != 0: 
-                    maxScaleOff.x = parentRad.x / splineRad.x
-            if makesFarSides['y']:
-                if splineRad.y != 0: 
-                    maxScaleOff.y = parentRad.y / splineRad.y
-            if makesFarSides['z']:
-                if splineRad.z != 0: 
-                    maxScaleOff.z = parentRad.z / splineRad.z
+            maxScaleOff = c4d.Vector(0)
+            if makesFarSides['x'] and not isclose(splineRad.x, 0.0): 
+                maxScaleOff.x = parentRad.x / splineRad.x
+            if makesFarSides['y'] and not isclose(splineRad.y, 0.0): 
+                maxScaleOff.y = parentRad.y / splineRad.y
+            if makesFarSides['z'] and not isclose(splineRad.z, 0.0): 
+                maxScaleOff.z = parentRad.z / splineRad.z
 
             scaleOff = c4d.Vector(1.0)
-            scaleOff.x = c4d.utils.RangeMap(complete, 1.0, 0.0, 1.0, maxScaleOff.x, False, xSpline)
-            scaleOff.y = c4d.utils.RangeMap(complete, 1.0, 0.0, 1.0, maxScaleOff.y, False, ySpline)
-            scaleOff.z = c4d.utils.RangeMap(complete, 1.0, 0.0, 1.0, maxScaleOff.z, False, zSpline)
+            scaleOff.x = c4d.utils.RangeMap(complete, 0.0, 1.0, maxScaleOff.x, 1.0, False, xSpline)
+            scaleOff.y = c4d.utils.RangeMap(complete, 0.0, 1.0, maxScaleOff.y, 1.0, False, ySpline)
+            scaleOff.z = c4d.utils.RangeMap(complete, 0.0, 1.0, maxScaleOff.z, 1.0, False, zSpline)
 
             # position
             splineRelPos = spline.GetRelPos()
             maxPosOff = -splineRelPos
             splineObjSpaceAnchor = (-spline.GetMp()) + splineRad
-            if makesFarSides['x']:
-                if splineRad.x != 0:
-                    origPosX = splineRelPos.x
-                    newSplineObjSpaceAnchorX = (splineObjSpaceAnchor.x / splineRad.x) * parentRad.x
-                    newPosX = newSplineObjSpaceAnchorX - parentObjSpaceAnchor.x
-                    maxPosOff.x = newPosX - origPosX
-            if makesFarSides['y']:
-                if splineRad.y != 0:
-                    origPosY = splineRelPos.y
-                    newSplineObjSpaceAnchorY = (splineObjSpaceAnchor.y / splineRad.y) * parentRad.y
-                    newPosY = newSplineObjSpaceAnchorY - parentObjSpaceAnchor.y
-                    maxPosOff.y = newPosY - origPosY
-            if makesFarSides['z']:
-                if splineRad.z != 0:
-                    origPosZ = splineRelPos.z
-                    newSplineObjSpaceAnchorZ = (splineObjSpaceAnchor.z / splineRad.z) * parentRad.z
-                    newPosZ = newSplineObjSpaceAnchorZ - parentObjSpaceAnchor.z
-                    maxPosOff.z = newPosZ - origPosZ
+            if makesFarSides['x'] and not isclose(splineRad.x, 0.0):
+                origPosX = splineRelPos.x
+                newSplineObjSpaceAnchorX = (splineObjSpaceAnchor.x / splineRad.x) * parentRad.x
+                newPosX = newSplineObjSpaceAnchorX - parentObjSpaceAnchor.x
+                maxPosOff.x = newPosX - origPosX
+            if makesFarSides['y'] and not isclose(splineRad.y, 0.0):
+                origPosY = splineRelPos.y
+                newSplineObjSpaceAnchorY = (splineObjSpaceAnchor.y / splineRad.y) * parentRad.y
+                newPosY = newSplineObjSpaceAnchorY - parentObjSpaceAnchor.y
+                maxPosOff.y = newPosY - origPosY
+            if makesFarSides['z'] and not isclose(splineRad.z, 0.0):
+                origPosZ = splineRelPos.z
+                newSplineObjSpaceAnchorZ = (splineObjSpaceAnchor.z / splineRad.z) * parentRad.z
+                newPosZ = newSplineObjSpaceAnchorZ - parentObjSpaceAnchor.z
+                maxPosOff.z = newPosZ - origPosZ
 
-            posOff = c4d.Vector(0)
-            posOff.x = c4d.utils.RangeMap(complete, 1.0, 0.0, 0.0, maxPosOff.x, False, xSpline)
-            posOff.y = c4d.utils.RangeMap(complete, 1.0, 0.0, 0.0, maxPosOff.y, False, ySpline)
-            posOff.z = c4d.utils.RangeMap(complete, 1.0, 0.0, 0.0, maxPosOff.z, False, zSpline)
+            posOff = c4d.Vector(0.0)
+            posOff.x = c4d.utils.RangeMap(complete, 0.0, 1.0, maxPosOff.x, 0.0, False, xSpline)
+            posOff.y = c4d.utils.RangeMap(complete, 0.0, 1.0, maxPosOff.y, 0.0, False, ySpline)
+            posOff.z = c4d.utils.RangeMap(complete, 0.0, 1.0, maxPosOff.z, 0.0, False, zSpline)
 
             # apply
             spline.SetFrozenPos(posOff)
