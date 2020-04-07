@@ -204,12 +204,20 @@ class SubdivideGrid(c4d.plugins.TagData):
         newVec.z = min(a.z, b.z)
         return newVec
 
+    def GetGlobalRegPos(self, obj):
+        pos = obj.GetRelPos()
+        parent = obj.GetUp()
+        while parent:
+            pos += parent.GetRelPos()
+            parent = parent.GetUp()
+        return pos
+
     def GetObjectBBox(self, obj):
         rad = obj.GetRad()
         if isclose(rad.GetLength(), 0.0) and obj.GetDown():
             children = obj.GetChildren()
             return self.GetCollectiveBBox(children)
-        center = (obj.GetUpMg() * obj.GetRelPos()) + obj.GetMp()
+        center = self.GetGlobalRegPos(obj) + obj.GetMp()
         thisBlf = roundOffVector(center - rad)
         thisTrb = roundOffVector(center + rad)
         return { 'blf': thisBlf, 'trb': thisTrb }
@@ -273,8 +281,7 @@ class SubdivideGrid(c4d.plugins.TagData):
         if len(splines) == 0: return c4d.EXECUTIONRESULT_OK
         
         # gather parent info so not to recalculate later
-        parentMg = parent.GetMg()
-        parentAnchor = parentMg.off
+        parentAnchor = self.GetGlobalRegPos(parent)
         parentBBox = self.GetCollectiveBBox(splines)
         parentCorners = self.GetCornersFromBBox(parentBBox)
         def DistFromAnchor(obj, anchor=parentAnchor):
@@ -288,6 +295,7 @@ class SubdivideGrid(c4d.plugins.TagData):
         for spline in splines:
             if not spline.GetDeformMode(): continue # spline is disabled
 
+            splineAnchor = self.GetGlobalRegPos(spline)
             splineBBox = self.GetObjectBBox(spline)
             splineRad = self.GetRadFromBBox(splineBBox)
             makesFarSides = self.MakesFarSides(splineBBox, parentFarCorner)
@@ -307,9 +315,9 @@ class SubdivideGrid(c4d.plugins.TagData):
             scaleOff.z = c4d.utils.RangeMap(complete, 0.0, 1.0, maxScaleOff.z, 1.0, False, zSpline)
 
             # position
-            splineRelPos = spline.GetRelPos()
+            splineRelPos = -(parentAnchor - splineAnchor)
             maxPosOff = -splineRelPos
-            splineObjSpaceAnchor = (-spline.GetMp()) + splineRad
+            splineObjSpaceAnchor = splineAnchor - splineBBox['blf']
             if makesFarSides['x'] and not isclose(splineRad.x, 0.0):
                 origPosX = splineRelPos.x
                 newSplineObjSpaceAnchorX = (splineObjSpaceAnchor.x / splineRad.x) * parentRad.x
