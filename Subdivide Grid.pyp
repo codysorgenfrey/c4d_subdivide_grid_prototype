@@ -34,6 +34,18 @@ def roundOffVector(inVec):
     outVec.z = math.floor(inVec.z * per + 0.5) / per
     return outVec
 
+def MapRange(value, min_input, max_input, min_output, max_output, curve):
+    inrange = max_input - min_input
+    if isclose(inrange, 0.0):
+        value = 0.0
+    else:
+        value = (value - min_input) / inrange
+
+    if curve:
+        value = curve.GetPoint(value).y
+
+    return  min_output + (max_output - min_output) * value
+
 class res_SG(object):
     SG_COMPLETE = 1000
     SG_SPLINE_GROUP = 1001
@@ -41,28 +53,11 @@ class res_SG(object):
     SG_SPLINE_Y = 1003
     SG_SPLINE_Z = 1004
     SG_LIST = 1005
+    SG_NONRECT = 1006
+    SG_INOBJ = 1007
 res_SG = res_SG()
 
-class SubdivideGrid(c4d.plugins.TagData):
-    PLUGIN_ID = 1054125
-    PLUGIN_NAME = 'Subdivide Grid'
-    PLUGIN_INFO = c4d.TAG_VISIBLE | c4d.TAG_EXPRESSION
-    PLUGIN_DESC = 'Tsubdividegrid'
-    PLUGIN_ICON = load_bitmap('res/icons/subdivide grid.tiff')
-    PLUGIN_DISKLEVEL = 0
-
-    @classmethod
-    def Register(cls):
-        return c4d.plugins.RegisterTagPlugin(
-            cls.PLUGIN_ID,
-            cls.PLUGIN_NAME,
-            cls.PLUGIN_INFO,
-            cls,
-            cls.PLUGIN_DESC,
-            cls.PLUGIN_ICON,
-            cls.PLUGIN_DISKLEVEL,
-        )
-
+class SubdivideGridBase(c4d.plugins.TagData):
     def GetDDescription(self, node, description, flags):
         # Before adding dynamic parameters, load the parameters from the description resource
         if not description.LoadDescription(node.GetType()): return False
@@ -86,6 +81,17 @@ class SubdivideGrid(c4d.plugins.TagData):
             bc.SetFloat(c4d.DESC_STEP, 0.01)
             bc.SetBool(c4d.DESC_GUIOPEN, True)
             if not description.SetParameter(completeID, bc, c4d.ID_TAGPROPERTIES):
+                return False
+
+        # Add Non Rectangle control
+        nonRectID = c4d.DescID(c4d.DescLevel(res_SG.SG_NONRECT, c4d.DTYPE_BOOL))
+        if singleID is None or nonRectID.IsPartOf(singleID)[0]:
+            bc = c4d.GetCustomDataTypeDefault(c4d.DTYPE_BOOL)
+            bc.SetString(c4d.DESC_NAME, 'Non-Rectangular')
+            bc.SetString(c4d.DESC_SHORT_NAME, 'Non-Rectangular')
+            bc.SetBool(c4d.DESC_DEFAULT, False)
+            bc.SetBool(c4d.DESC_GUIOPEN, True)
+            if not description.SetParameter(nonRectID, bc, c4d.ID_TAGPROPERTIES):
                 return False
 
         # Add list control
@@ -153,10 +159,26 @@ class SubdivideGrid(c4d.plugins.TagData):
         # After parameters have been loaded and added successfully, return True and DESCFLAGS_DESC_LOADED with the input flags
         return (True, flags | c4d.DESCFLAGS_DESC_LOADED)
 
+    def GetDEnabling(self, node, desc, t_data, flags, itemdesc):
+        myId = desc[0].id
+
+        if myId == res_SG.SG_SPLINE_X and node[res_SG.SG_NONRECT]:
+            return False
+        
+        if myId == res_SG.SG_SPLINE_Y and node[res_SG.SG_NONRECT]:
+            return False
+
+        if myId == res_SG.SG_SPLINE_Z and node[res_SG.SG_NONRECT]:
+            return False
+        
+        return True
+
     def Init(self, node):
         self.InitAttr(node, float, res_SG.SG_COMPLETE)
 
         node[res_SG.SG_COMPLETE] = 100.0
+
+        node[res_SG.SG_NONRECT] = False
 
         node[res_SG.SG_LIST] = c4d.InExcludeData()
 
@@ -265,10 +287,16 @@ class SubdivideGrid(c4d.plugins.TagData):
     def Execute(self, tag, doc, op, bt, priority, flags):
         parent = tag.GetObject()
         complete = tag[res_SG.SG_COMPLETE]
+        nonRect = tag[res_SG.SG_NONRECT]
         splineList = tag[res_SG.SG_LIST]
         xSpline = tag[res_SG.SG_SPLINE_X]
         ySpline = tag[res_SG.SG_SPLINE_Y]
         zSpline = tag[res_SG.SG_SPLINE_Z]
+        if nonRect:
+            complete *= 2.0
+            xSpline = None
+            ySpline = None
+            zSpline = None
 
         # collect splines
         splines = []
@@ -310,9 +338,9 @@ class SubdivideGrid(c4d.plugins.TagData):
                 maxScaleOff.z = parentRad.z / splineRad.z
 
             scaleOff = c4d.Vector(1.0)
-            scaleOff.x = c4d.utils.RangeMap(complete, 0.0, 1.0, maxScaleOff.x, 1.0, False, xSpline)
-            scaleOff.y = c4d.utils.RangeMap(complete, 0.0, 1.0, maxScaleOff.y, 1.0, False, ySpline)
-            scaleOff.z = c4d.utils.RangeMap(complete, 0.0, 1.0, maxScaleOff.z, 1.0, False, zSpline)
+            scaleOff.x = MapRange(complete, 0.0, 1.0, maxScaleOff.x, 1.0, xSpline)
+            scaleOff.y = MapRange(complete, 0.0, 1.0, maxScaleOff.y, 1.0, ySpline)
+            scaleOff.z = MapRange(complete, 0.0, 1.0, maxScaleOff.z, 1.0, zSpline)
 
             # position
             splineRelPos = -(parentAnchor - splineAnchor)
@@ -335,9 +363,9 @@ class SubdivideGrid(c4d.plugins.TagData):
                 maxPosOff.z = newPosZ - origPosZ
 
             posOff = c4d.Vector(0.0)
-            posOff.x = c4d.utils.RangeMap(complete, 0.0, 1.0, maxPosOff.x, 0.0, False, xSpline)
-            posOff.y = c4d.utils.RangeMap(complete, 0.0, 1.0, maxPosOff.y, 0.0, False, ySpline)
-            posOff.z = c4d.utils.RangeMap(complete, 0.0, 1.0, maxPosOff.z, 0.0, False, zSpline)
+            posOff.x = MapRange(complete, 0.0, 1.0, maxPosOff.x, 0.0, xSpline)
+            posOff.y = MapRange(complete, 0.0, 1.0, maxPosOff.y, 0.0, ySpline)
+            posOff.z = MapRange(complete, 0.0, 1.0, maxPosOff.z, 0.0, zSpline)
 
             # apply
             spline.SetFrozenPos(posOff)
@@ -346,6 +374,108 @@ class SubdivideGrid(c4d.plugins.TagData):
 
         return c4d.EXECUTIONRESULT_OK
 
+class SubdivideGridNonRect(SubdivideGridBase):
+    def Init(self, node):
+        super(SubdivideGridNonRect, self).Init(node)
+
+        node[res_SG.SG_NONRECT] = True
+
+        node[res_SG.SG_COMPLETE] = 0.5
+
+        return True
+
+class SubdivideGridInstance(c4d.plugins.ObjectData):
+    LAST_FRAME = -1
+
+    def GetDDescription(self, node, description, flags):
+        # Before adding dynamic parameters, load the parameters from the description resource
+        if not description.LoadDescription(node.GetType()): return False
+
+        # Get description single ID
+        singleID = description.GetSingleDescID()
+
+        # Add link control
+        linkId = c4d.DescID(c4d.DescLevel(res_SG.SG_INOBJ, c4d.DTYPE_BASELISTLINK))
+        if singleID is None or linkId.IsPartOf(singleID)[0]:
+            bc = c4d.GetCustomDataTypeDefault(c4d.DTYPE_BASELISTLINK)
+            bc.SetString(c4d.DESC_NAME, 'Input')
+            bc.SetString(c4d.DESC_SHORT_NAME, 'Input')
+            if not description.SetParameter(linkId, bc, c4d.ID_OBJECTPROPERTIES):
+                return False
+
+        # After parameters have been loaded and added successfully, return True and DESCFLAGS_DESC_LOADED with the input flags
+        return (True, flags | c4d.DESCFLAGS_DESC_LOADED)      
+
+    def CheckDirty(self, op, doc):
+        frame = doc.GetTime().GetFrame(doc.GetFps())
+        if self.LAST_FRAME != frame:
+            self.LAST_FRAME = frame
+            op.SetDirty(c4d.DIRTYFLAGS_DATA)
+
+    def GetContour(self, op, doc, lod, bt):
+        inObj = op[res_SG.SG_INOBJ]
+        if inObj is None: return None
+        
+        if inObj.GetType() == c4d.Ospline:
+            spline = inObj.GetClone()
+        else:
+            objClone = inObj.GetClone()
+            result = c4d.utils.SendModelingCommand(
+                c4d.MCOMMAND_CURRENTSTATETOOBJECT,
+                [objClone],
+                c4d.MODELINGCOMMANDMODE_ALL,
+                c4d.BaseContainer(),
+                doc,
+                c4d.MODELINGCOMMANDFLAGS_NONE,
+                )
+            if result is not False:
+                spline = result[0]
+            else:
+                realSpline = inObj.GetRealSpline()
+                if realSpline:
+                    spline = realSpline.GetClone()
+                else: 
+                    spline = None
+        
+        if spline.GetType() != c4d.Ospline:
+            return None
+
+        mg = inObj.GetMg()
+
+        for x in range(spline.GetPointCount()):
+            p = spline.GetPoint(x)
+            p = mg * p
+            spline.SetPoint(x, p)
+
+        spline.Message(c4d.MSG_UPDATE)
+
+        return spline
 
 if __name__ == '__main__':
-    SubdivideGrid.Register()
+    c4d.plugins.RegisterTagPlugin(
+            1054125,
+            '#$0 Subdivide Grid',
+            c4d.TAG_VISIBLE | c4d.TAG_EXPRESSION,
+            SubdivideGridBase,
+            'Tsubdividegrid',
+            load_bitmap('res/icons/subdivide grid.tiff'),
+            0,
+        )
+    c4d.plugins.RegisterTagPlugin(
+            1054108,
+            '#$1 Subdivide Grid (Non-Rect)',
+            c4d.TAG_VISIBLE | c4d.TAG_EXPRESSION,
+            SubdivideGridNonRect,
+            'Tsubdividegridnonrect',
+            load_bitmap('res/icons/subdivide grid.tiff'),
+            0,
+        )
+    c4d.plugins.RegisterObjectPlugin(
+            1054128,
+            "Instance",
+            SubdivideGridInstance,
+            "Osubdividegridinstance",
+            c4d.OBJECT_GENERATOR | c4d.OBJECT_ISSPLINE,
+            load_bitmap('res/icons/subdivide grid.tiff'),
+            0
+        )
