@@ -3,22 +3,6 @@ import c4d # pylint: disable=import-error
 import os
 import math
 
-class res_SG(object):
-    SG_COMPLETE = 1000
-    SG_HOR = 1001
-    SG_VERT = 1002
-    SG_CAP = 1003
-res_SG = res_SG()
-
-class res_SGD(object):
-    SGD_COMPLETE = 1000
-    SGD_OFF = 1001
-    SGD_OFF_MULT = 1002
-res_SGD = res_SGD()
-
-def isclose(a, b, rel_tol=1e-09, abs_tol=0.0):
-    return abs(a-b) <= max(rel_tol * max(abs(a), abs(b)), abs_tol)
-
 def load_bitmap(path):
     path = os.path.join(os.path.dirname(__file__), path)
     bmp = c4d.bitmaps.BaseBitmap()
@@ -26,520 +10,472 @@ def load_bitmap(path):
         bmp = None
     return bmp
 
-def GetObjectSpline(obj, doc):
-    if obj.GetType() == c4d.Ospline:
-        return obj
-    
-    if obj.GetType() == SubdivideGrid.PLUGIN_ID:
-        return obj.GetRealSpline()
-    
-    objClone = obj.GetClone()
-    result = c4d.utils.SendModelingCommand(
-        c4d.MCOMMAND_CURRENTSTATETOOBJECT,
-        [objClone],
-        c4d.MODELINGCOMMANDMODE_ALL,
-        c4d.BaseContainer(),
-        doc,
-        c4d.MODELINGCOMMANDFLAGS_NONE,
-        )
-    if result is not False:
-        spline = result[0]
-    else:
-        spline = obj.GetRealSpline()
+def isclose(a, b, rel_tol=1e-09, abs_tol=0.0):
+    if rel_tol < 0 or abs_tol < 0:
+        raise ValueError("tolerances must be non-negative")
 
-    if not (spline.GetInfo() & c4d.OBJECT_ISSPLINE):
-        return None
-
-    return spline
-
-class SubdivideGridDriver(c4d.plugins.TagData):
-    PLUGIN_ID = 1054125
-    PLUGIN_NAME = 'Subdivide Grid Driver'
-    PLUGIN_INFO = c4d.TAG_VISIBLE | c4d.TAG_EXPRESSION
-    PLUGIN_DESC = 'Tsubdividegriddriver'
-    PLUGIN_ICON = load_bitmap('res/icons/subdivide grid.tiff')
-    PLUGIN_DISKLEVEL = 0
-
-    @classmethod
-    def Register(cls):
-        return c4d.plugins.RegisterTagPlugin(
-            cls.PLUGIN_ID,
-            cls.PLUGIN_NAME,
-            cls.PLUGIN_INFO,
-            cls,
-            cls.PLUGIN_DESC,
-            cls.PLUGIN_ICON,
-            cls.PLUGIN_DISKLEVEL,
-        )
-
-    def Init(self, node):
-        self.InitAttr(node, float, res_SGD.SGD_COMPLETE)
-        self.InitAttr(node, float, res_SGD.SGD_OFF)
-        self.InitAttr(node, float, res_SGD.SGD_OFF_MULT)
-
-        node[res_SGD.SGD_COMPLETE] = 100.0
-        node[res_SGD.SGD_OFF] = -12.0
-        node[res_SGD.SGD_OFF_MULT] = 1.0
-        
+    if a == b:
         return True
 
-    def RecursiveSetDirty(self, obj):
-        while obj:
-            if obj.GetType() == SubdivideGrid.PLUGIN_ID:
-                obj.GetRealSpline()
+    if math.isinf(a) or math.isinf(b):
+        return False
 
-            child = obj.GetDown()
-            if child:
-                self.RecursiveSetDirty(child)
-            
-            obj = obj.GetNext()
-    
-    def Execute(self, tag, doc, op, bt, priority, flags):
-        self.RecursiveSetDirty(op) # called to update objects on every frame for frame offsets
-        return c4d.EXECUTIONRESULT_OK
+    diff = math.fabs(b - a)
+    result = (((diff <= math.fabs(rel_tol * b)) or
+               (diff <= math.fabs(rel_tol * a))) or
+              (diff <= abs_tol))
+    return result
 
-class SubdivideGrid(c4d.plugins.ObjectData):
-    PLUGIN_ID = 1054108
-    PLUGIN_NAME = 'Subdivide Grid'
-    PLUGIN_INFO = c4d.OBJECT_GENERATOR | c4d.OBJECT_INPUT | c4d.OBJECT_ISSPLINE
-    PLUGIN_DESC = 'Osubdividegrid'
-    PLUGIN_ICON = load_bitmap('res/icons/subdivide grid.tiff')
-    PLUGIN_DISKLEVEL = 0
+def roundOffVector(inVec):
+    outVec = c4d.Vector()
+    per = 10000
+    outVec.x = math.floor(inVec.x * per + 0.5) / per
+    outVec.y = math.floor(inVec.y * per + 0.5) / per
+    outVec.z = math.floor(inVec.z * per + 0.5) / per
+    return outVec
 
-    @classmethod
-    def Register(cls):
-        return c4d.plugins.RegisterObjectPlugin(
-            cls.PLUGIN_ID,
-            cls.PLUGIN_NAME,
-            cls,
-            cls.PLUGIN_DESC,
-            cls.PLUGIN_INFO,
-            cls.PLUGIN_ICON,
-            cls.PLUGIN_DISKLEVEL
-        )
+def MapRange(value, min_input, max_input, min_output, max_output, curve):
+    inrange = max_input - min_input
+    if isclose(inrange, 0.0):
+        value = 0.0
+    else:
+        value = (value - min_input) / inrange
+
+    if curve:
+        value = curve.GetPoint(value).y
+
+    return  min_output + (max_output - min_output) * value
+
+class res_SG(object):
+    SG_COMPLETE = 1000
+    SG_SPLINE_GROUP = 1001
+    SG_SPLINE_X = 1002
+    SG_SPLINE_Y = 1003
+    SG_SPLINE_Z = 1004
+    SG_LIST = 1005
+    SG_NONRECT = 1006
+    SG_INOBJ = 1007
+res_SG = res_SG()
+
+class SubdivideGridBase(c4d.plugins.TagData):
+    def GetDDescription(self, node, description, flags):
+        # Before adding dynamic parameters, load the parameters from the description resource
+        if not description.LoadDescription(node.GetType()): return False
+
+        # Get description single ID
+        singleID = description.GetSingleDescID()
+
+        # Add Complete control
+        completeID = c4d.DescID(c4d.DescLevel(res_SG.SG_COMPLETE, c4d.DTYPE_REAL))
+        if singleID is None or completeID.IsPartOf(singleID)[0]:
+            bc = c4d.GetCustomDataTypeDefault(c4d.DTYPE_REAL)
+            bc.SetString(c4d.DESC_NAME, 'Complete')
+            bc.SetString(c4d.DESC_SHORT_NAME, 'Complete')
+            bc.SetInt32(c4d.DESC_UNIT, c4d.DESC_UNIT_PERCENT)
+            bc.SetInt32(c4d.DESC_CUSTOMGUI, c4d.CUSTOMGUI_REALSLIDER)
+            bc.SetFloat(c4d.DESC_DEFAULT, 1.0)
+            bc.SetFloat(c4d.DESC_MIN, 0.0)
+            bc.SetFloat(c4d.DESC_MAX, 1.0)
+            bc.SetFloat(c4d.DESC_MINSLIDER, 0.0)
+            bc.SetFloat(c4d.DESC_MAXSLIDER, 1.0)
+            bc.SetFloat(c4d.DESC_STEP, 0.01)
+            bc.SetBool(c4d.DESC_GUIOPEN, True)
+            if not description.SetParameter(completeID, bc, c4d.ID_TAGPROPERTIES):
+                return False
+
+        # Add Non Rectangle control
+        nonRectID = c4d.DescID(c4d.DescLevel(res_SG.SG_NONRECT, c4d.DTYPE_BOOL))
+        if singleID is None or nonRectID.IsPartOf(singleID)[0]:
+            bc = c4d.GetCustomDataTypeDefault(c4d.DTYPE_BOOL)
+            bc.SetString(c4d.DESC_NAME, 'Non-Rectangular')
+            bc.SetString(c4d.DESC_SHORT_NAME, 'Non-Rectangular')
+            bc.SetBool(c4d.DESC_DEFAULT, False)
+            bc.SetBool(c4d.DESC_GUIOPEN, True)
+            if not description.SetParameter(nonRectID, bc, c4d.ID_TAGPROPERTIES):
+                return False
+
+        # Add list control
+        listID = c4d.DescID(c4d.DescLevel(res_SG.SG_LIST, c4d.CUSTOMDATATYPE_INEXCLUDE_LIST))
+        if singleID is None or listID.IsPartOf(singleID)[0]:
+            bc = c4d.GetCustomDataTypeDefault(c4d.CUSTOMDATATYPE_INEXCLUDE_LIST)
+            bc.SetString(c4d.DESC_NAME, 'Splines')
+            bc.SetString(c4d.DESC_SHORT_NAME, 'Splines')
+            bc.SetBool(c4d.DESC_GUIOPEN, True)
+            if not description.SetParameter(listID, bc, c4d.ID_TAGPROPERTIES):
+                return False
+
+        # Add spline group
+        splineGroupID = c4d.DescID(c4d.DescLevel(res_SG.SG_SPLINE_GROUP, c4d.DTYPE_GROUP))
+        if singleID is None or splineGroupID.IsPartOf(singleID)[0]:
+            bc = c4d.GetCustomDataTypeDefault(c4d.DTYPE_GROUP)
+            bc.SetString(c4d.DESC_NAME, 'Time Ramps')
+            bc.SetString(c4d.DESC_SHORT_NAME, 'Time Ramps')
+            bc.SetBool(c4d.DESC_GUIOPEN, False)
+            if not description.SetParameter(splineGroupID, bc, c4d.DESCID_ROOT):
+                return False
+        
+        # Add x ramp control
+        splineXID = c4d.DescID(c4d.DescLevel(res_SG.SG_SPLINE_X, c4d.CUSTOMDATATYPE_SPLINE))
+        if singleID is None or splineXID.IsPartOf(singleID)[0]:
+            bc = c4d.GetCustomDataTypeDefault(c4d.CUSTOMDATATYPE_SPLINE)
+            bc.SetString(c4d.DESC_NAME, 'X Ramp')
+            bc.SetString(c4d.DESC_SHORT_NAME, 'X Ramp')
+            bc.SetBool(c4d.DESC_GUIOPEN, False)
+            bc.SetFloat(c4d.SPLINECONTROL_X_MIN, 0.0)
+            bc.SetFloat(c4d.SPLINECONTROL_X_MAX, 1.0)
+            bc.SetFloat(c4d.SPLINECONTROL_Y_MIN, 0.0)
+            bc.SetFloat(c4d.SPLINECONTROL_Y_MAX, 1.0)
+            if not description.SetParameter(splineXID, bc, splineGroupID):
+                return False
+        
+        # Add y ramp control
+        splineYID = c4d.DescID(c4d.DescLevel(res_SG.SG_SPLINE_Y, c4d.CUSTOMDATATYPE_SPLINE))
+        if singleID is None or splineYID.IsPartOf(singleID)[0]:
+            bc = c4d.GetCustomDataTypeDefault(c4d.CUSTOMDATATYPE_SPLINE)
+            bc.SetString(c4d.DESC_NAME, 'Y Ramp')
+            bc.SetString(c4d.DESC_SHORT_NAME, 'Y Ramp')
+            bc.SetBool(c4d.DESC_GUIOPEN, False)
+            bc.SetFloat(c4d.SPLINECONTROL_X_MIN, 0.0)
+            bc.SetFloat(c4d.SPLINECONTROL_X_MAX, 1.0)
+            bc.SetFloat(c4d.SPLINECONTROL_Y_MIN, 0.0)
+            bc.SetFloat(c4d.SPLINECONTROL_Y_MAX, 1.0)
+            if not description.SetParameter(splineYID, bc, splineGroupID):
+                return False
+
+        # Add z ramp control
+        splineZID = c4d.DescID(c4d.DescLevel(res_SG.SG_SPLINE_Z, c4d.CUSTOMDATATYPE_SPLINE))
+        if singleID is None or splineZID.IsPartOf(singleID)[0]:
+            bc = c4d.GetCustomDataTypeDefault(c4d.CUSTOMDATATYPE_SPLINE)
+            bc.SetString(c4d.DESC_NAME, 'Z Ramp')
+            bc.SetString(c4d.DESC_SHORT_NAME, 'Z Ramp')
+            bc.SetBool(c4d.DESC_GUIOPEN, False)
+            bc.SetFloat(c4d.SPLINECONTROL_X_MIN, 0.0)
+            bc.SetFloat(c4d.SPLINECONTROL_X_MAX, 1.0)
+            bc.SetFloat(c4d.SPLINECONTROL_Y_MIN, 0.0)
+            bc.SetFloat(c4d.SPLINECONTROL_Y_MAX, 1.0)
+            if not description.SetParameter(splineZID, bc, splineGroupID):
+                return False
+
+        # After parameters have been loaded and added successfully, return True and DESCFLAGS_DESC_LOADED with the input flags
+        return (True, flags | c4d.DESCFLAGS_DESC_LOADED)
+
+    def GetDEnabling(self, node, desc, t_data, flags, itemdesc):
+        myId = desc[0].id
+
+        if myId == res_SG.SG_SPLINE_X and node[res_SG.SG_NONRECT]:
+            return False
+        
+        if myId == res_SG.SG_SPLINE_Y and node[res_SG.SG_NONRECT]:
+            return False
+
+        if myId == res_SG.SG_SPLINE_Z and node[res_SG.SG_NONRECT]:
+            return False
+        
+        return True
 
     def Init(self, node):
         self.InitAttr(node, float, res_SG.SG_COMPLETE)
-        self.InitAttr(node, float, res_SG.SG_HOR)
-        self.InitAttr(node, float, res_SG.SG_VERT)
-        self.InitAttr(node, bool, res_SG.SG_CAP)
 
         node[res_SG.SG_COMPLETE] = 100.0
-        node[res_SG.SG_HOR] = 0.0
-        node[res_SG.SG_VERT] = 0.0
-        node[res_SG.SG_CAP] = False
 
-        if not hasattr(self, 'LAST_FRAME'):
-            self.LAST_FRAME = -1
-        if not hasattr(self, 'DRIVER'):
-            self.DRIVER = None
+        node[res_SG.SG_NONRECT] = False
+
+        node[res_SG.SG_LIST] = c4d.InExcludeData()
+
+        sd = c4d.SplineData()
+        knots = sd.GetKnots()
+        knots[0]['vPos'] = c4d.Vector(0)
+        knots[0]['vTangentRight'] = c4d.Vector(0.25)
+        knots[1]['vPos'] = c4d.Vector(1)
+        knots[1]['vTangentLeft'] = c4d.Vector(-0.25)
+        sd.SetKnot(
+            0,
+            knots[0]['vPos'],
+            knots[0]['lFlagsSettings'],
+            knots[0]['bSelect'],
+            knots[0]['vTangentLeft'],
+            knots[0]['vTangentRight'],
+            knots[0]['interpol']
+        )
+        sd.SetKnot(
+            1,
+            knots[1]['vPos'],
+            knots[1]['lFlagsSettings'],
+            knots[1]['bSelect'],
+            knots[1]['vTangentLeft'],
+            knots[1]['vTangentRight'],
+            knots[1]['interpol']
+        )
+        node[res_SG.SG_SPLINE_X] = sd
+        node[res_SG.SG_SPLINE_Y] = sd
+        node[res_SG.SG_SPLINE_Z] = sd
         
         return True
 
-    def GetDEnabling(self, node, id, t_data, flags, itemdesc):
-        if self.DRIVER:
-            paramID = id[0].id
-            if paramID == res_SG.SG_COMPLETE:
-                return False
+    def maxVector(self, a, b):
+        newVec = c4d.Vector()
+        newVec.x = max(a.x, b.x)
+        newVec.y = max(a.y, b.y)
+        newVec.z = max(a.z, b.z)
+        return newVec
 
-        return True
+    def minVector(self, a, b):
+        newVec = c4d.Vector()
+        newVec.x = min(a.x, b.x)
+        newVec.y = min(a.y, b.y)
+        newVec.z = min(a.z, b.z)
+        return newVec
 
-    def MergeSplines(self, spline1, spline2):
-        segCnt = spline1.GetSegmentCount()
-        pntCnt = spline1.GetPointCount()
-        tanCnt = spline1.GetTangentCount()
-        segCnt2 = spline2.GetSegmentCount()
-        pntCnt2 = spline2.GetPointCount()
-        tanCnt2 = spline2.GetTangentCount()
-        newPntCnt = pntCnt2 + pntCnt
-        newSegCnt = segCnt2 + segCnt
-        newTanCnt = tanCnt2 + tanCnt
-        objMarr = spline2.GetMl()
-
-        spline1.ResizeObject(newPntCnt, newSegCnt)
-        for x in range(pntCnt, newPntCnt):
-            p = spline2.GetPoint(x - pntCnt)
-            spline1.SetPoint(x, objMarr * p)
-
-        for x in range(tanCnt, newTanCnt):
-            tan = spline2.GetTangent(x - tanCnt)
-            spline1.SetTangent(x, tan['vl'], tan['vr'])
-
-        for x in range(segCnt, newSegCnt):
-            if x - segCnt < 0: # for splines with no segments
-                spline1.SetSegment(x, pntCnt, spline2.IsClosed())
-            else:
-                seg = spline2.GetSegment(x - segCnt)
-                spline1.SetSegment(x, seg['cnt'], seg['closed'])
-        
-        spline1.Message(c4d.MSG_UPDATE) # because we updated its points
-        return spline1
-
-    def RecursiveCollectInputs(self, op, doc, obj):
-        inObj = c4d.SplineObject(0, c4d.SPLINETYPE_BEZIER)
-        inObj[c4d.SPLINEOBJECT_CLOSED] = True
-
-        while obj:
-            info = obj.GetInfo()
-            if (info & c4d.OBJECT_GENERATOR) and not obj[c4d.ID_BASEOBJECT_GENERATOR_FLAG]:
-                obj = obj.GetNext()
-                continue
-
-            spline = GetObjectSpline(obj, doc)
-            if spline is None:
-                obj = obj.GetNext()
-                continue
-
-            inObj = self.MergeSplines(inObj, spline)
-
-            obj = obj.GetNext()
-
-        return inObj
-
-    def GetAllChildrenSplines(self, op, doc, obj):
-        inObj = c4d.SplineObject(0, c4d.SPLINETYPE_BEZIER)
-        inObj[c4d.SPLINEOBJECT_CLOSED] = True
-
-        while obj:
-            if obj.GetType() == SubdivideGrid.PLUGIN_ID:
-                child = obj.GetDown()
-                if child is not None:
-                    childSpline = self.RecursiveCollectInputs(op, doc, child)
-                    inObj = self.MergeSplines(inObj, childSpline)
-                obj = obj.GetNext()
-                continue
-
-            info = obj.GetInfo()
-            if (info & c4d.OBJECT_GENERATOR) and not obj[c4d.ID_BASEOBJECT_GENERATOR_FLAG]:
-                obj = obj.GetNext()
-                continue
-
-            spline = GetObjectSpline(obj, doc)
-            if spline is None:
-                obj = obj.GetNext()
-                continue
-
-            inObj = self.MergeSplines(inObj, spline)
-
-            obj = obj.GetNext()
-
-        return inObj
-
-    def SegmentIsRect(self, obj, start, end):
-        isRect = True
-        for x in range(start, end):
-            ni = x + 1
-            if ni >= end:
-                ni = start
-            pi = x - 1
-            if pi < start:
-                pi = end - 1
-            pp = obj.GetPoint(pi)
-            p = obj.GetPoint(x)
-            np = obj.GetPoint(ni)
-
-            pd = pp - p
-            nd = p - np
-            dot = pd.Dot(nd)
-
-            isRect = isRect and dot == 0
-
-        return isRect
-
-    def GetSegmentDims(self, obj, start, end):
-        trb = obj.GetPoint(start)
-        blf = obj.GetPoint(start)
-        for x in range(start, end):
-            p = obj.GetPoint(x)
-            trb.x = max(trb.x, p.x)
-            trb.y = max(trb.y, p.y)
-            blf.x = min(blf.x, p.x)
-            blf.y = min(blf.y, p.y)
-
-        return [trb, blf]
-
-    def PointMakesBorder(self, p, boundsMin, boundMax):
-        makesBorder = c4d.Vector(0)
-        if isclose(p.x, boundsMin.x) or isclose(abs(p.x), boundMax.x):
-            makesBorder.x = 1
-        if isclose(p.y, boundsMin.y) or isclose(abs(p.y), boundMax.y):
-            makesBorder.y = 1
-        return makesBorder
-
-    def CompletionAtTime(self, obj, doc, time):
-        cTrack = obj.FindCTrack(res_SGD.SGD_COMPLETE)
-        if cTrack is None:
-            return obj[res_SGD.SGD_COMPLETE]
-        
-        return cTrack.GetValue(doc, time, doc.GetFps())
-
-    def AnimateGrid(self, doc, op, inSpline, outObj, forCaps):
-        curTime = doc.GetTime()
-        fps = doc.GetFps()
-        horOff = c4d.BaseTime(op[res_SG.SG_HOR], fps)
-        vertOff = c4d.BaseTime(op[res_SG.SG_VERT], fps)
-
-        parent = op.GetUp()
-        tag = op.GetTag(SubdivideGridDriver.PLUGIN_ID)
-        level = 0
-        while parent and not tag:
-            if parent.GetType() == SubdivideGrid.PLUGIN_ID:
-                level += 1
-            tag = parent.GetTag(SubdivideGridDriver.PLUGIN_ID)
+    def GetGlobalRegPos(self, obj):
+        pos = obj.GetRelPos()
+        parent = obj.GetUp()
+        while parent:
+            pos += parent.GetRelPos()
             parent = parent.GetUp()
+        return pos
 
-        driver = op.GetClone()
-        self.DRIVER = False
-        offsetStep = 0.0
-        if tag is not None:
-            driver = tag.GetClone()
-            self.DRIVER = True
-            offsetStep = tag[res_SGD.SGD_OFF]
-            offsetMult = tag[res_SGD.SGD_OFF_MULT]
-            offsetStep *= offsetMult
+    def GetObjectBBox(self, obj):
+        rad = obj.GetRad()
+        if isclose(rad.GetLength(), 0.0) and obj.GetDown():
+            children = obj.GetChildren()
+            return self.GetCollectiveBBox(children)
+        center = self.GetGlobalRegPos(obj) + obj.GetMp()
+        thisBlf = roundOffVector(center - rad)
+        thisTrb = roundOffVector(center + rad)
+        return { 'blf': thisBlf, 'trb': thisTrb }
 
-        levelOff = c4d.BaseTime(offsetStep * level, fps)
-        lookupTime = curTime
-        if forCaps:
-            cTrack = driver.FindCTrack(res_SGD.SGD_COMPLETE)
-            if cTrack is not None:
-                curve = cTrack.GetCurve()
-                if curve is not None:
-                    keyCount = curve.GetKeyCount()
-                    if keyCount != 0:
-                        firstKey = curve.GetKey(0)
-                        lastKey =  curve.GetKey(keyCount - 1)
-                        duration = lastKey.GetTime() - firstKey.GetTime()
-                        lookupTime = c4d.BaseTime(duration.Get() * 0.99)
-        hor = self.CompletionAtTime(driver, doc, lookupTime + horOff + levelOff)
-        vert = self.CompletionAtTime(driver, doc, lookupTime + vertOff + levelOff)
-        size = inSpline.GetRad() * 2
+    def GetCollectiveBBox(self, splines):
+        initBbox = self.GetObjectBBox(splines[0])
+        blf = initBbox['blf']
+        trb = initBbox['trb']
+        for x in range(1, len(splines)):
+            bbox = self.GetObjectBBox(splines[x])
+            blf = self.minVector(bbox['blf'], blf)
+            trb = self.maxVector(bbox['trb'], trb)
+        return { 'blf': blf, 'trb': trb }
 
-        pointOff = 0
-        segCount = inSpline.GetSegmentCount()
-        for x in range(segCount):
-            seg = inSpline.GetSegment(x)
-            newPointOff = pointOff + seg['cnt']
-            isRect = self.SegmentIsRect(inSpline, pointOff, newPointOff)
-            dims = self.GetSegmentDims(inSpline, pointOff, newPointOff)
-            scaledDims = [c4d.Vector(), c4d.Vector()]
+    def GetRadFromBBox(self, bbox):
+        rad = c4d.Vector()
+        rad.x = abs(bbox['trb'].x - bbox['blf'].x) / 2
+        rad.y = abs(bbox['trb'].y - bbox['blf'].y) / 2
+        rad.z = abs(bbox['trb'].z - bbox['blf'].z) / 2
+        return rad
 
-            for y in range(len(dims)):
-                locked = self.PointMakesBorder(dims[y], c4d.Vector(0), size)
-                if not bool(locked.x):
-                    scaledDims[y].x = c4d.utils.RangeMap(vert, 0.0, 1.0, 0.0, dims[y].x, False)
-                else:
-                    scaledDims[y].x = dims[y].x
-                if not bool(locked.y):
-                    scaledDims[y].y = c4d.utils.RangeMap(hor, 0.0, 1.0, 0.0, dims[y].y, False)
-                else:
-                    scaledDims[y].y = dims[y].y
-            
-            if not isRect:
-                width = scaledDims[0].x - scaledDims[1].x
-                height = scaledDims[0].y - scaledDims[1].y
-                scale = min(width, height)
-                locked = self.PointMakesBorder(scaledDims[0], c4d.Vector(), size)
-                if not bool(locked.x):
-                    scaledDims[0].x = scaledDims[1].x + scale
-                if not bool(locked.y):
-                    scaledDims[0].y = scaledDims[1].y + scale
-                locked = self.PointMakesBorder(scaledDims[1], c4d.Vector(), size)
-                if not bool(locked.x):
-                    scaledDims[1].x = scaledDims[0].x - scale
-                if not bool(locked.y):
-                    scaledDims[1].y = scaledDims[0].y - scale
+    def GetCornersFromBBox(self, bbox):
+        corners = [None] * 8
+        corners[0] = bbox['blf']
+        corners[1] = bbox['trb']
+        corners[2] = c4d.Vector(corners[0].x, corners[0].y, corners[1].z)
+        corners[3] = c4d.Vector(corners[0].x, corners[1].y, corners[0].z)
+        corners[4] = c4d.Vector(corners[1].x, corners[0].y, corners[0].z)
+        corners[5] = c4d.Vector(corners[1].x, corners[1].y, corners[0].z)
+        corners[6] = c4d.Vector(corners[1].x, corners[0].y, corners[1].z)
+        corners[7] = c4d.Vector(corners[0].x, corners[1].y, corners[1].z)
+        return corners
 
-            for y in range(pointOff, newPointOff):
-                p = inSpline.GetPoint(y)
-                p.x = c4d.utils.RangeMap(p.x, dims[0].x, dims[1].x, scaledDims[0].x, scaledDims[1].x, False)
-                p.y = c4d.utils.RangeMap(p.y, dims[0].y, dims[1].y, scaledDims[0].y, scaledDims[1].y, False)
-                outObj.SetPoint(y, p)
-            
-            pointOff = newPointOff
+    def MakesFarSides(self, splineBBox, farCorner):
+        x = False
+        y = False
+        z = False
+        corners = self.GetCornersFromBBox(splineBBox)
+        for corner in corners:
+            if isclose(corner.x, farCorner.x): x = True
+            if isclose(corner.y, farCorner.y): y = True
+            if isclose(corner.z, farCorner.z): z = True
+        return { 'x': x, 'y': y, 'z': z }
+    
+    def Execute(self, tag, doc, op, bt, priority, flags):
+        parent = tag.GetObject()
+        complete = tag[res_SG.SG_COMPLETE]
+        nonRect = tag[res_SG.SG_NONRECT]
+        splineList = tag[res_SG.SG_LIST]
+        xSpline = tag[res_SG.SG_SPLINE_X]
+        ySpline = tag[res_SG.SG_SPLINE_Y]
+        zSpline = tag[res_SG.SG_SPLINE_Z]
+        if nonRect:
+            complete *= 2.0
+            xSpline = None
+            ySpline = None
+            zSpline = None
 
-        outObj.Message(c4d.MSG_UPDATE)
-        return outObj        
+        # collect splines
+        splines = []
+        for x in range(splineList.GetObjectCount()):
+            splines.append(splineList.ObjectFromIndex(doc, x))
+        # if nothing in list, get children
+        if len(splines) == 0:
+            splines = parent.GetChildren()
 
-    def GetCap(self, op, doc, inObj):
-        outGeo = inObj.GetClone()
-        movedSpline = self.AnimateGrid(doc, op, inObj, outGeo, True)
-        splineHelp = c4d.utils.SplineHelp()
-        splineHelp.InitSplineWith(movedSpline, c4d.SPLINEHELPFLAGS_GLOBALSPACE | c4d.SPLINEHELPFLAGS_CONTINUECURVE | c4d.SPLINEHELPFLAGS_RETAINLINEOBJECT)
-        lineObj = splineHelp.GetLineObject()
-        return lineObj.Triangulate(0.0)
-
-    def IsTopmost(self, obj):
-        obj = obj.GetUp()
-        if obj is None:
-            return True
-
-        while obj:
-            if obj.GetType() == SubdivideGrid.PLUGIN_ID:
-                return False
-            obj = obj.GetUp()
+        if len(splines) == 0: return c4d.EXECUTIONRESULT_OK
         
+        # gather parent info so not to recalculate later
+        parentAnchor = self.GetGlobalRegPos(parent)
+        parentBBox = self.GetCollectiveBBox(splines)
+        parentCorners = self.GetCornersFromBBox(parentBBox)
+        def DistFromAnchor(obj, anchor=parentAnchor):
+            return (anchor - obj).GetLength()
+        parentCorners.sort(key=DistFromAnchor)
+        parentFarCorner = parentCorners[7]
+        parentRad = self.GetRadFromBBox(parentBBox)
+        parentObjSpaceAnchor = parentAnchor - parentBBox['blf']
+
+        # calculate movements
+        for spline in splines:
+            if not spline.GetDeformMode(): continue # spline is disabled
+
+            splineAnchor = self.GetGlobalRegPos(spline)
+            splineBBox = self.GetObjectBBox(spline)
+            splineRad = self.GetRadFromBBox(splineBBox)
+            makesFarSides = self.MakesFarSides(splineBBox, parentFarCorner)
+
+            # scale
+            maxScaleOff = c4d.Vector(0)
+            if makesFarSides['x'] and not isclose(splineRad.x, 0.0): 
+                maxScaleOff.x = parentRad.x / splineRad.x
+            if makesFarSides['y'] and not isclose(splineRad.y, 0.0): 
+                maxScaleOff.y = parentRad.y / splineRad.y
+            if makesFarSides['z'] and not isclose(splineRad.z, 0.0): 
+                maxScaleOff.z = parentRad.z / splineRad.z
+
+            scaleOff = c4d.Vector(1.0)
+            scaleOff.x = MapRange(complete, 0.0, 1.0, maxScaleOff.x, 1.0, xSpline)
+            scaleOff.y = MapRange(complete, 0.0, 1.0, maxScaleOff.y, 1.0, ySpline)
+            scaleOff.z = MapRange(complete, 0.0, 1.0, maxScaleOff.z, 1.0, zSpline)
+
+            # position
+            splineRelPos = -(parentAnchor - splineAnchor)
+            maxPosOff = -splineRelPos
+            splineObjSpaceAnchor = splineAnchor - splineBBox['blf']
+            if makesFarSides['x'] and not isclose(splineRad.x, 0.0):
+                origPosX = splineRelPos.x
+                newSplineObjSpaceAnchorX = (splineObjSpaceAnchor.x / splineRad.x) * parentRad.x
+                newPosX = newSplineObjSpaceAnchorX - parentObjSpaceAnchor.x
+                maxPosOff.x = newPosX - origPosX
+            if makesFarSides['y'] and not isclose(splineRad.y, 0.0):
+                origPosY = splineRelPos.y
+                newSplineObjSpaceAnchorY = (splineObjSpaceAnchor.y / splineRad.y) * parentRad.y
+                newPosY = newSplineObjSpaceAnchorY - parentObjSpaceAnchor.y
+                maxPosOff.y = newPosY - origPosY
+            if makesFarSides['z'] and not isclose(splineRad.z, 0.0):
+                origPosZ = splineRelPos.z
+                newSplineObjSpaceAnchorZ = (splineObjSpaceAnchor.z / splineRad.z) * parentRad.z
+                newPosZ = newSplineObjSpaceAnchorZ - parentObjSpaceAnchor.z
+                maxPosOff.z = newPosZ - origPosZ
+
+            posOff = c4d.Vector(0.0)
+            posOff.x = MapRange(complete, 0.0, 1.0, maxPosOff.x, 0.0, xSpline)
+            posOff.y = MapRange(complete, 0.0, 1.0, maxPosOff.y, 0.0, ySpline)
+            posOff.z = MapRange(complete, 0.0, 1.0, maxPosOff.z, 0.0, zSpline)
+
+            # apply
+            spline.SetFrozenPos(posOff)
+            spline.SetFrozenScale(scaleOff)
+            spline.Message(c4d.MSG_UPDATE)
+
+        return c4d.EXECUTIONRESULT_OK
+
+class SubdivideGridNonRect(SubdivideGridBase):
+    def Init(self, node):
+        super(SubdivideGridNonRect, self).Init(node)
+
+        node[res_SG.SG_NONRECT] = True
+
+        node[res_SG.SG_COMPLETE] = 0.5
+
         return True
 
-    def CheckDirty(self, op, doc): # for get contour only
+class SubdivideGridInstance(c4d.plugins.ObjectData):
+    LAST_FRAME = -1
+
+    def GetDDescription(self, node, description, flags):
+        # Before adding dynamic parameters, load the parameters from the description resource
+        if not description.LoadDescription(node.GetType()): return False
+
+        # Get description single ID
+        singleID = description.GetSingleDescID()
+
+        # Add link control
+        linkId = c4d.DescID(c4d.DescLevel(res_SG.SG_INOBJ, c4d.DTYPE_BASELISTLINK))
+        if singleID is None or linkId.IsPartOf(singleID)[0]:
+            bc = c4d.GetCustomDataTypeDefault(c4d.DTYPE_BASELISTLINK)
+            bc.SetString(c4d.DESC_NAME, 'Input')
+            bc.SetString(c4d.DESC_SHORT_NAME, 'Input')
+            if not description.SetParameter(linkId, bc, c4d.ID_OBJECTPROPERTIES):
+                return False
+
+        # After parameters have been loaded and added successfully, return True and DESCFLAGS_DESC_LOADED with the input flags
+        return (True, flags | c4d.DESCFLAGS_DESC_LOADED)      
+
+    def CheckDirty(self, op, doc):
         frame = doc.GetTime().GetFrame(doc.GetFps())
         if self.LAST_FRAME != frame:
             self.LAST_FRAME = frame
             op.SetDirty(c4d.DIRTYFLAGS_DATA)
 
     def GetContour(self, op, doc, lod, bt):
-        inObj = op.GetDown()
+        inObj = op[res_SG.SG_INOBJ]
         if inObj is None: return None
-
-        inSpline = self.RecursiveCollectInputs(op, doc, inObj)
-        if inSpline is None: return None
-
-        outObj = inSpline.GetClone()
-        return self.AnimateGrid(doc, op, inSpline, outObj, False)
-
-    def GetVirtualObjects(self, op, hh):
-        doc = op.GetDocument()
-        if doc is None: return None
-
-        inObj = op.GetDown()
-        if inObj is None: return None
-
-        hClone = op.GetAndCheckHierarchyClone(hh, inObj, c4d.HIERARCHYCLONEFLAGS_ASSPLINE, True)
-        if not hClone['dirty']: return hClone['clone']
-
-        inSpline = self.RecursiveCollectInputs(op, doc, inObj)
-        if inSpline is None: return None
-
-        cap = op[res_SG.SG_CAP]
-        if cap:
-            capSpline = self.GetAllChildrenSplines(op, doc, inObj)
-            outGeo = self.GetCap(op, doc, capSpline)
-            phong = outGeo.GetTag(c4d.Tphong)
-            phong[c4d.PHONGTAG_PHONG_ANGLELIMIT] = True
-            phong[c4d.PHONGTAG_PHONG_ANGLE] = c4d.utils.DegToRad(89.0)
-            phong[c4d.PHONGTAG_PHONG_USEEDGES] = False
+        
+        if inObj.GetType() == c4d.Ospline:
+            spline = inObj.GetClone()
         else:
-            outGeo = inSpline.GetClone()
-
-        animatedGrid = self.AnimateGrid(doc, op, inSpline, outGeo, False)
-
-        if cap:
-            settings = c4d.BaseContainer()
-            settings[c4d.MDATA_OPTIMIZE_TOLERANCE] = 0.01
-            settings[c4d.MDATA_OPTIMIZE_POINTS] = False
-            settings[c4d.MDATA_OPTIMIZE_POLYGONS] = True
-            settings[c4d.MDATA_OPTIMIZE_UNUSEDPOINTS] = True
-            success = c4d.utils.SendModelingCommand(
-                c4d.MCOMMAND_OPTIMIZE,
-                [animatedGrid],
+            objClone = inObj.GetClone()
+            result = c4d.utils.SendModelingCommand(
+                c4d.MCOMMAND_CURRENTSTATETOOBJECT,
+                [objClone],
                 c4d.MODELINGCOMMANDMODE_ALL,
-                settings,
+                c4d.BaseContainer(),
                 doc,
                 c4d.MODELINGCOMMANDFLAGS_NONE,
-            )
-            if not success: return None
+                )
+            if result is not False:
+                spline = result[0]
+            else:
+                realSpline = inObj.GetRealSpline()
+                if realSpline:
+                    spline = realSpline.GetClone()
+                else: 
+                    spline = None
+        
+        if spline.GetType() != c4d.Ospline:
+            return None
 
-        return animatedGrid
+        mg = inObj.GetMg()
 
-class SubdivideGridExtrude(c4d.plugins.ObjectData):
-    PLUGIN_ID = 1054128
-    PLUGIN_NAME = 'Subdivide Grid Extrude'
-    PLUGIN_INFO = c4d.OBJECT_GENERATOR | c4d.OBJECT_INPUT
-    PLUGIN_DESC = 'Osubdividegridextrude'
-    PLUGIN_ICON = load_bitmap('res/icons/subdivide grid.tiff')
-    PLUGIN_DISKLEVEL = 0
+        for x in range(spline.GetPointCount()):
+            p = spline.GetPoint(x)
+            p = mg * p
+            spline.SetPoint(x, p)
 
-    @classmethod
-    def Register(cls):
-        return c4d.plugins.RegisterObjectPlugin(
-            cls.PLUGIN_ID,
-            cls.PLUGIN_NAME,
-            cls,
-            cls.PLUGIN_DESC,
-            cls.PLUGIN_INFO,
-            cls.PLUGIN_ICON,
-            cls.PLUGIN_DISKLEVEL
-        )
+        spline.Message(c4d.MSG_UPDATE)
 
-    def Init(self, node):
-        return True
-
-    def GetVirtualObjects(self, op, hh):
-        doc = op.GetDocument()
-        if doc is None: return None
-
-        inObj = op.GetDown()
-        if inObj is None: return None
-
-        hClone = op.GetAndCheckHierarchyClone(hh, inObj, c4d.HIERARCHYCLONEFLAGS_ASSPLINE, False)
-        if not hClone['dirty']: return hClone['clone']
-
-        inSpline = GetObjectSpline(inObj, doc)
-        if inSpline is None: return None
-
-        movement = c4d.Vector(0, 0, -10)
-
-        inPointCount = inSpline.GetPointCount()
-        points = []
-        polys = []
-        segCount = inSpline.GetSegmentCount()
-        if segCount == 0:
-            inSpline.ResizeObject(inPointCount, 1)
-            inSpline.SetSegment(0, inPointCount, inSpline.IsClosed())
-            segCount = 1
-        pointOff = 0
-        inMarr = inSpline.GetMl()
-
-        # points
-        for x in range(segCount):
-            seg = inSpline.GetSegment(x)
-            newPointOff = pointOff + seg['cnt']
-            for y in range(pointOff, newPointOff):
-                p = inSpline.GetPoint(y) * inMarr
-                points.append(p)
-                points.append(p + movement)
-            pointOff = newPointOff
-
-        # polys
-        pointOff = 0
-        for x in range(segCount):
-            seg = inSpline.GetSegment(x)
-            newPointOff = pointOff + (seg['cnt'] * 2)
-            for y in range(pointOff, newPointOff, 2):
-                p1 = y
-                p2 = p1 + 1
-                p3 = p2 + 1
-                if p3 >= newPointOff: p3 = pointOff
-                p4 = p3 + 1
-                polys.append(c4d.CPolygon(p1, p2, p4, p3))
-            pointOff = newPointOff
-
-        # caps
-        # pointOff = 0
-        # for x in range(segCount):
-        #     seg = inSpline.GetSegment(x)
-        #     newPointOff = pointOff + (seg['cnt'] * 2)
-        #     numTris = (seg['cnt'] - 2) * 2
-        #     for y in range(numTris):
-        #         evenOdd = y % 2
-        #         p1 = pointOff + evenOdd
-        #         p2 = y + evenOdd + pointOff + (2 - evenOdd)
-        #         p3 = p2 + 2
-        #         if evenOdd == 0:
-        #             polys.append(c4d.CPolygon(p1, p2, p3))
-        #         else:
-        #             polys.append(c4d.CPolygon(p3, p2, p1))
-        #     pointOff = newPointOff
-
-        outObj = c4d.PolygonObject(len(points), len(polys))
-        outObj.SetAllPoints(points)
-        for x, poly in enumerate(polys):
-            outObj.SetPolygon(x, poly)
-        outObj.Message(c4d.MSG_UPDATE)
-
-        return outObj
+        return spline
 
 if __name__ == '__main__':
-    SubdivideGrid.Register()
-    SubdivideGridDriver.Register()
-    SubdivideGridExtrude.Register()
+    c4d.plugins.RegisterTagPlugin(
+            1054125,
+            '#$0 Subdivide Grid',
+            c4d.TAG_VISIBLE | c4d.TAG_EXPRESSION,
+            SubdivideGridBase,
+            'Tsubdividegrid',
+            load_bitmap('res/icons/subdivide grid.tiff'),
+            0,
+        )
+    c4d.plugins.RegisterTagPlugin(
+            1054108,
+            '#$1 Subdivide Grid (Non-Rect)',
+            c4d.TAG_VISIBLE | c4d.TAG_EXPRESSION,
+            SubdivideGridNonRect,
+            'Tsubdividegridnonrect',
+            load_bitmap('res/icons/subdivide grid.tiff'),
+            0,
+        )
+    c4d.plugins.RegisterObjectPlugin(
+            1054128,
+            "Instance",
+            SubdivideGridInstance,
+            "Osubdividegridinstance",
+            c4d.OBJECT_GENERATOR | c4d.OBJECT_ISSPLINE,
+            load_bitmap('res/icons/subdivide grid.tiff'),
+            0
+        )
